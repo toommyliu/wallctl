@@ -3,6 +3,7 @@ pub mod assets;
 pub mod cli;
 pub mod clock;
 pub mod config;
+pub mod heic;
 pub mod launch_agent;
 pub mod paths;
 pub mod profile;

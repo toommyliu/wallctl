@@ -33,6 +33,8 @@ pub enum Command {
     New(NewArgs),
     /// Capture the current macOS wallpaper profile into a collection.
     Capture(CaptureArgs),
+    /// Create dynamic HEIC wallpaper assets.
+    Heic(HeicArgs),
 }
 
 #[derive(Debug, Args)]
@@ -98,4 +100,20 @@ impl From<PresetArg> for Preset {
 pub struct CaptureArgs {
     pub collection: String,
     pub profile: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct HeicArgs {
+    /// Image to use when macOS appearance is Light.
+    #[arg(long)]
+    pub light: std::path::PathBuf,
+    /// Image to use when macOS appearance is Dark.
+    #[arg(long)]
+    pub dark: std::path::PathBuf,
+    /// Dynamic HEIC file to create.
+    #[arg(short, long)]
+    pub output: std::path::PathBuf,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
 }

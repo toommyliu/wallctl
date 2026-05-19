@@ -6,11 +6,12 @@ use std::fs;
 use std::io::Write;
 
 use crate::assets;
-use crate::cli::{ApplyArgs, CaptureArgs, Cli, CollectionArg, Command, NewArgs, NewKind};
+use crate::cli::{ApplyArgs, CaptureArgs, Cli, CollectionArg, Command, HeicArgs, NewArgs, NewKind};
 use crate::clock::Clock;
 use crate::config::{
     normalize_profile_name, slugify, title_from_input, CollectionConfig, State, Strategy,
 };
+use crate::heic;
 use crate::launch_agent;
 use crate::paths::WallctlPaths;
 use crate::profile::{self, ProfileInfo};
@@ -57,6 +58,7 @@ where
             Command::Remove(args) => self.remove(&args.collection),
             Command::New(args) => self.new_collection(args),
             Command::Capture(args) => self.capture(&args),
+            Command::Heic(args) => self.create_heic(&args),
         }
     }
 
@@ -413,6 +415,23 @@ where
         storage::remove_collection(&self.paths, &collection)?;
         self.log_event(&format!("removed collection '{collection}'"))?;
         println!("Removed collection '{collection}'");
+        Ok(())
+    }
+
+    fn create_heic(&self, args: &HeicArgs) -> Result<()> {
+        let report = heic::create_light_dark_heic(heic::LightDarkHeicSpec {
+            light: args.light.clone(),
+            dark: args.dark.clone(),
+            output: args.output.clone(),
+            force: args.force,
+        })?;
+        self.log_event(&format!(
+            "created dynamic HEIC '{}'",
+            report.output.display()
+        ))?;
+        println!("Created dynamic HEIC: {}", report.output.display());
+        println!("Light image: {}", report.light.display());
+        println!("Dark image: {}", report.dark.display());
         Ok(())
     }
 

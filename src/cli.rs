@@ -8,7 +8,7 @@ use crate::config::Preset;
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -39,12 +39,12 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct CollectionArg {
-    pub collection: String,
+    pub collection: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct ApplyArgs {
-    pub collection: String,
+    pub collection: Option<String>,
     pub profile: Option<String>,
     #[arg(long)]
     pub force: bool,
@@ -98,7 +98,7 @@ impl From<PresetArg> for Preset {
 
 #[derive(Debug, Args)]
 pub struct CaptureArgs {
-    pub collection: String,
+    pub collection: Option<String>,
     pub profile: Option<String>,
 }
 

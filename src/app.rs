@@ -1,12 +1,18 @@
 use anyhow::{bail, Context, Result};
 use chrono::Timelike;
+use inquire::{Confirm, Select, Text};
 use plist::Value;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs;
-use std::io::Write;
+use std::io::{self, IsTerminal, Write};
+use std::path::PathBuf;
 
 use crate::assets;
-use crate::cli::{ApplyArgs, CaptureArgs, Cli, CollectionArg, Command, HeicArgs, NewArgs, NewKind};
+use crate::cli::{
+    ApplyArgs, CaptureArgs, Cli, CollectionArg, Command, HeicArgs, NewArgs, NewCollectionArgs,
+    NewKind, NewScheduleArgs, PresetArg,
+};
 use crate::clock::Clock;
 use crate::config::{
     normalize_profile_name, slugify, title_from_input, CollectionConfig, State, Strategy,
@@ -33,6 +39,74 @@ struct LoadedProfile {
     info: ProfileInfo,
 }
 
+#[derive(Clone, Debug)]
+enum InteractiveAction {
+    UseCollection,
+    InspectCollection,
+    ApplyProfile,
+    CaptureWallpaper,
+    CreateCollection,
+    CreateHeic,
+    ListCollections,
+    Status,
+    Logs,
+    Quit,
+}
+
+impl fmt::Display for InteractiveAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UseCollection => f.write_str("wallctl use        Activate a collection strategy"),
+            Self::InspectCollection => {
+                f.write_str("wallctl inspect    Show collection metadata and validation details")
+            }
+            Self::ApplyProfile => {
+                f.write_str("wallctl apply      Apply one profile without changing active state")
+            }
+            Self::CaptureWallpaper => {
+                f.write_str("wallctl capture    Capture the current macOS wallpaper profile")
+            }
+            Self::CreateCollection => f.write_str("wallctl new        Create a collection"),
+            Self::CreateHeic => {
+                f.write_str("wallctl heic       Create dynamic HEIC wallpaper assets")
+            }
+            Self::ListCollections => f.write_str("wallctl list       List saved collections"),
+            Self::Status => {
+                f.write_str("wallctl status     Show active collection and drift status")
+            }
+            Self::Logs => f.write_str("wallctl logs       Print wallctl and scheduler logs"),
+            Self::Quit => f.write_str("Quit"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum SchedulePresetChoice {
+    None,
+    Three,
+    Four,
+}
+
+impl SchedulePresetChoice {
+    fn preset_arg(&self) -> Option<PresetArg> {
+        match self {
+            Self::None => None,
+            Self::Three => Some(PresetArg::Three),
+            Self::Four => Some(PresetArg::Four),
+        }
+    }
+}
+
+impl fmt::Display for SchedulePresetChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => f.write_str("No preset"),
+            Self::Three => f.write_str("Three fixed slots"),
+            Self::Four => f.write_str("Four fixed slots"),
+        }
+    }
+}
+
 impl<R, C> App<R, C>
 where
     R: CommandRunner,
@@ -48,18 +122,123 @@ where
 
     pub fn run(&self, cli: Cli) -> Result<()> {
         match cli.command {
-            Command::List => self.list(),
-            Command::Status => self.status(),
-            Command::Inspect(args) => self.inspect(&args),
-            Command::Use(args) => self.use_collection(&args.collection),
-            Command::Apply(args) => self.apply_command(&args),
-            Command::Dispatch(args) => self.dispatch(args.force),
-            Command::Logs => self.logs(),
-            Command::Remove(args) => self.remove(&args.collection),
-            Command::New(args) => self.new_collection(args),
-            Command::Capture(args) => self.capture(&args),
-            Command::Heic(args) => self.create_heic(&args),
+            Some(Command::List) => self.list(),
+            Some(Command::Status) => self.status(),
+            Some(Command::Inspect(args)) => self.inspect(&args),
+            Some(Command::Use(args)) => self.use_collection(args.collection.as_deref()),
+            Some(Command::Apply(args)) => self.apply_command(&args),
+            Some(Command::Dispatch(args)) => self.dispatch(args.force),
+            Some(Command::Logs) => self.logs(),
+            Some(Command::Remove(args)) => self.remove(args.collection.as_deref()),
+            Some(Command::New(args)) => self.new_collection(args),
+            Some(Command::Capture(args)) => self.capture(&args),
+            Some(Command::Heic(args)) => self.create_heic(&args),
+            None => self.interactive_menu(),
         }
+    }
+
+    fn interactive_menu(&self) -> Result<()> {
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            bail!("a command is required in non-interactive shells; run `wallctl --help`");
+        }
+
+        loop {
+            match Select::new(
+                "What do you want to do?",
+                vec![
+                    InteractiveAction::UseCollection,
+                    InteractiveAction::InspectCollection,
+                    InteractiveAction::ApplyProfile,
+                    InteractiveAction::CaptureWallpaper,
+                    InteractiveAction::CreateCollection,
+                    InteractiveAction::CreateHeic,
+                    InteractiveAction::ListCollections,
+                    InteractiveAction::Status,
+                    InteractiveAction::Logs,
+                    InteractiveAction::Quit,
+                ],
+            )
+            .prompt()
+            .context("interactive menu was cancelled")?
+            {
+                InteractiveAction::UseCollection => self.use_collection(None)?,
+                InteractiveAction::InspectCollection => {
+                    self.inspect(&CollectionArg { collection: None })?
+                }
+                InteractiveAction::ApplyProfile => self.apply_command(&ApplyArgs {
+                    collection: None,
+                    profile: None,
+                    force: false,
+                })?,
+                InteractiveAction::CaptureWallpaper => self.capture(&CaptureArgs {
+                    collection: None,
+                    profile: None,
+                })?,
+                InteractiveAction::CreateCollection => self.prompt_new_collection()?,
+                InteractiveAction::CreateHeic => self.prompt_create_heic()?,
+                InteractiveAction::ListCollections => self.list()?,
+                InteractiveAction::Status => self.status()?,
+                InteractiveAction::Logs => self.logs()?,
+                InteractiveAction::Quit => return Ok(()),
+            }
+            println!();
+        }
+    }
+
+    fn prompt_new_collection(&self) -> Result<()> {
+        let strategy = Select::new(
+            "Select collection strategy",
+            vec![Strategy::Static, Strategy::Dynamic, Strategy::Schedule],
+        )
+        .prompt()
+        .context("collection strategy selection was cancelled")?;
+        let name = Text::new("Collection name")
+            .prompt()
+            .context("collection name prompt was cancelled")?;
+        let args = match strategy {
+            Strategy::Static => NewArgs {
+                kind: NewKind::Static(NewCollectionArgs { name }),
+            },
+            Strategy::Dynamic => NewArgs {
+                kind: NewKind::Dynamic(NewCollectionArgs { name }),
+            },
+            Strategy::Schedule => {
+                let preset = Select::new(
+                    "Schedule preset",
+                    vec![
+                        SchedulePresetChoice::None,
+                        SchedulePresetChoice::Three,
+                        SchedulePresetChoice::Four,
+                    ],
+                )
+                .prompt()
+                .context("schedule preset selection was cancelled")?;
+                NewArgs {
+                    kind: NewKind::Schedule(NewScheduleArgs {
+                        name,
+                        preset: preset.preset_arg(),
+                    }),
+                }
+            }
+        };
+
+        self.new_collection(args)
+    }
+
+    fn prompt_create_heic(&self) -> Result<()> {
+        let light = prompt_path("Light image path")?;
+        let dark = prompt_path("Dark image path")?;
+        let output = prompt_path("Output HEIC path")?;
+        let force = Confirm::new("Replace output if it already exists?")
+            .with_default(false)
+            .prompt()
+            .context("overwrite confirmation was cancelled")?;
+        self.create_heic(&HeicArgs {
+            light,
+            dark,
+            output,
+            force,
+        })
     }
 
     fn new_collection(&self, args: NewArgs) -> Result<()> {
@@ -98,7 +277,7 @@ where
     fn capture(&self, args: &CaptureArgs) -> Result<()> {
         storage::ensure_base_dirs(&self.paths)?;
 
-        let collection = normalize_collection_slug(&args.collection)?;
+        let collection = self.resolve_collection_arg(args.collection.as_deref(), "capture")?;
         let config = storage::read_collection(&self.paths, &collection)?;
         let profile_name = self.profile_name_for_capture(&config, args.profile.as_deref())?;
 
@@ -213,7 +392,7 @@ where
     }
 
     fn inspect(&self, args: &CollectionArg) -> Result<()> {
-        let collection = normalize_collection_slug(&args.collection)?;
+        let collection = self.resolve_collection_arg(args.collection.as_deref(), "inspect")?;
         let config = storage::read_collection(&self.paths, &collection)?;
         println!("Name: {}", config.name);
         println!("Title: {}", config.title);
@@ -259,9 +438,9 @@ where
         Ok(())
     }
 
-    fn use_collection(&self, raw_collection: &str) -> Result<()> {
+    fn use_collection(&self, raw_collection: Option<&str>) -> Result<()> {
         storage::ensure_base_dirs(&self.paths)?;
-        let collection = normalize_collection_slug(raw_collection)?;
+        let collection = self.resolve_collection_arg(raw_collection, "use")?;
         let config = storage::read_collection(&self.paths, &collection)?;
         self.prepare_collection_for_activation(&config)?;
 
@@ -303,7 +482,7 @@ where
     }
 
     fn apply_command(&self, args: &ApplyArgs) -> Result<()> {
-        let collection = normalize_collection_slug(&args.collection)?;
+        let collection = self.resolve_collection_arg(args.collection.as_deref(), "apply")?;
         let config = storage::read_collection(&self.paths, &collection)?;
         let profile_name = self.profile_name_for_apply(&config, args.profile.as_deref())?;
         let outcome = self.apply_profile(&config, &profile_name, args.force)?;
@@ -410,8 +589,12 @@ where
         Ok(())
     }
 
-    fn remove(&self, raw_collection: &str) -> Result<()> {
-        let collection = normalize_collection_slug(raw_collection)?;
+    fn remove(&self, raw_collection: Option<&str>) -> Result<()> {
+        let collection = self.resolve_collection_arg(raw_collection, "remove")?;
+        if raw_collection.is_none() && !confirm(&format!("Remove collection '{collection}'?"))? {
+            println!("Cancelled.");
+            return Ok(());
+        }
         storage::remove_collection(&self.paths, &collection)?;
         self.log_event(&format!("removed collection '{collection}'"))?;
         println!("Removed collection '{collection}'");
@@ -542,9 +725,7 @@ where
             (Strategy::Static | Strategy::Dynamic, None) => {
                 Ok(config.default_profile_name()?.to_string())
             }
-            (Strategy::Schedule, None) => {
-                bail!("scheduled collections require an explicit profile name for capture")
-            }
+            (Strategy::Schedule, None) => self.prompt_for_profile(config, "capture"),
         }
     }
 
@@ -583,6 +764,78 @@ where
         storage::write_state(&self.paths, &state)
     }
 
+    fn resolve_collection_arg(
+        &self,
+        raw_collection: Option<&str>,
+        command: &str,
+    ) -> Result<String> {
+        match raw_collection {
+            Some(collection) => normalize_collection_slug(collection),
+            None => self.prompt_for_collection(command),
+        }
+    }
+
+    fn prompt_for_collection(&self, command: &str) -> Result<String> {
+        ensure_interactive(command, "collection")?;
+
+        let collections = storage::list_collections(&self.paths)?;
+        if collections.is_empty() {
+            bail!("no collections found; create one with `wallctl new ...` first");
+        }
+
+        let options: Vec<String> = collections
+            .iter()
+            .map(|collection| {
+                format!(
+                    "{} ({}) [{}]",
+                    collection.title, collection.name, collection.strategy
+                )
+            })
+            .collect();
+        let selected = Select::new("Select collection", options)
+            .prompt()
+            .context("collection selection was cancelled")?;
+        let index = collections
+            .iter()
+            .position(|collection| {
+                selected
+                    == format!(
+                        "{} ({}) [{}]",
+                        collection.title, collection.name, collection.strategy
+                    )
+            })
+            .expect("selected option comes from collections");
+
+        Ok(collections[index].name.clone())
+    }
+
+    fn prompt_for_profile(&self, config: &CollectionConfig, command: &str) -> Result<String> {
+        ensure_interactive(command, "profile")?;
+
+        let profiles = self.expected_profile_names(config)?;
+        if profiles.is_empty() {
+            bail!("collection '{}' has no configured profiles", config.name);
+        }
+
+        let options: Vec<String> = profiles
+            .iter()
+            .map(|profile| {
+                let path = self.paths.profile_path(&config.name, profile);
+                let status = if path.exists() { "captured" } else { "missing" };
+                format!("{profile} [{status}]")
+            })
+            .collect();
+        let selected = Select::new("Select profile", options)
+            .prompt()
+            .context("profile selection was cancelled")?;
+        let profile = selected
+            .split_once(' ')
+            .map(|(profile, _)| profile)
+            .unwrap_or(&selected);
+
+        Ok(profile.to_string())
+    }
+
     fn log_event(&self, message: &str) -> Result<()> {
         if let Some(parent) = self.paths.wallctl_log.parent() {
             fs::create_dir_all(parent)
@@ -608,6 +861,45 @@ fn normalize_collection_slug(input: &str) -> Result<String> {
         bail!("mutating commands use exact collection slugs; did you mean '{slug}'?");
     }
     Ok(slug)
+}
+
+fn ensure_interactive(command: &str, value: &str) -> Result<()> {
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        Ok(())
+    } else {
+        bail!("{value} is required for `wallctl {command}` in non-interactive shells")
+    }
+}
+
+fn confirm(label: &str) -> Result<bool> {
+    Confirm::new(label)
+        .with_default(false)
+        .prompt()
+        .context("confirmation was cancelled")
+}
+
+fn prompt_path(label: &str) -> Result<PathBuf> {
+    let value = Text::new(label)
+        .prompt()
+        .with_context(|| format!("{label} prompt was cancelled"))?;
+    if value.trim().is_empty() {
+        bail!("{label} cannot be empty");
+    }
+    Ok(expand_home_path(value.trim()))
+}
+
+fn expand_home_path(value: &str) -> PathBuf {
+    if value == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+
+    PathBuf::from(value)
 }
 
 #[cfg(test)]
@@ -655,11 +947,11 @@ mod tests {
         );
 
         app.run(Cli {
-            command: Command::New(NewArgs {
+            command: Some(Command::New(NewArgs {
                 kind: NewKind::Static(NewCollectionArgs {
                     name: "Focus Mode".to_string(),
                 }),
-            }),
+            })),
         })
         .unwrap();
 
@@ -679,9 +971,9 @@ mod tests {
         let app = App::new(paths, FakeRunner::default(), FixedClock { hour: 12 });
 
         let result = app.run(Cli {
-            command: Command::Use(CollectionArg {
-                collection: "aerial-day".to_string(),
-            }),
+            command: Some(Command::Use(CollectionArg {
+                collection: Some("aerial-day".to_string()),
+            })),
         });
 
         assert!(result.is_err());
@@ -705,11 +997,11 @@ mod tests {
             FixedClock { hour: 12 },
         );
         app.run(Cli {
-            command: Command::Apply(ApplyArgs {
-                collection: "focus".to_string(),
+            command: Some(Command::Apply(ApplyArgs {
+                collection: Some("focus".to_string()),
                 profile: None,
                 force: false,
-            }),
+            })),
         })
         .unwrap();
 
@@ -739,10 +1031,10 @@ mod tests {
         let app = App::new(paths, FakeRunner::default(), FixedClock { hour: 12 });
 
         let result = app.run(Cli {
-            command: Command::Capture(crate::cli::CaptureArgs {
-                collection: "aerial-day".to_string(),
+            command: Some(Command::Capture(crate::cli::CaptureArgs {
+                collection: Some("aerial-day".to_string()),
                 profile: None,
-            }),
+            })),
         });
 
         assert!(result.is_err());

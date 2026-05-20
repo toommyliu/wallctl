@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use plist::Value;
+use serde_json::Value as JsonValue;
 
 use crate::paths::WallctlPaths;
 use crate::profile::{self, ProfileInfo, AERIAL_PROVIDER};
@@ -23,6 +24,12 @@ pub fn prepare_captured_profile(
     collection: &str,
     profile: &mut Value,
 ) -> Result<CaptureAssetReport> {
+    if profile::has_default_wallpaper_provider(profile) {
+        if let Some(asset_id) = default_aerial_asset_id(paths)? {
+            profile::promote_default_aerial_profile(profile, &asset_id)?;
+        }
+    }
+
     let info = profile::validate_profile(profile)?;
     let copied_files = profile::rewrite_file_references(profile, |source| {
         copy_wallpaper_asset(paths, collection, source)
@@ -171,6 +178,105 @@ fn backup_aerial_asset(paths: &WallctlPaths, collection: &str, asset_id: &str) -
     Ok(destination)
 }
 
+fn default_aerial_asset_id(paths: &WallctlPaths) -> Result<Option<String>> {
+    if !paths.aerial_manifest_entries.is_file() {
+        return Ok(None);
+    }
+
+    let manifest = fs::read_to_string(&paths.aerial_manifest_entries).with_context(|| {
+        format!(
+            "failed to read Aerial manifest {}",
+            paths.aerial_manifest_entries.display()
+        )
+    })?;
+    let manifest: JsonValue = serde_json::from_str(&manifest).with_context(|| {
+        format!(
+            "failed to parse Aerial manifest {}",
+            paths.aerial_manifest_entries.display()
+        )
+    })?;
+
+    for asset_id in representative_aerial_asset_ids(&manifest)
+        .into_iter()
+        .chain(aerial_asset_ids(&manifest))
+    {
+        if paths.aerial_cache.join(format!("{asset_id}.mov")).is_file() {
+            return Ok(Some(asset_id));
+        }
+    }
+
+    Ok(None)
+}
+
+fn representative_aerial_asset_ids(manifest: &JsonValue) -> Vec<String> {
+    let mut candidates: Vec<OrderedAssetId> = Vec::new();
+    let Some(categories) = manifest.get("categories").and_then(JsonValue::as_array) else {
+        return Vec::new();
+    };
+
+    for category in categories {
+        if let Some(asset_id) = category
+            .get("representativeAssetID")
+            .and_then(JsonValue::as_str)
+        {
+            candidates.push(ordered_asset_id(category, asset_id));
+        }
+
+        if let Some(subcategories) = category.get("subcategories").and_then(JsonValue::as_array) {
+            for subcategory in subcategories {
+                if let Some(asset_id) = subcategory
+                    .get("representativeAssetID")
+                    .and_then(JsonValue::as_str)
+                {
+                    candidates.push(ordered_asset_id(subcategory, asset_id));
+                }
+            }
+        }
+    }
+
+    candidates.sort_by_key(|candidate| candidate.preferred_order);
+    candidates
+        .into_iter()
+        .map(|candidate| candidate.asset_id)
+        .collect()
+}
+
+fn aerial_asset_ids(manifest: &JsonValue) -> Vec<String> {
+    let mut candidates: Vec<OrderedAssetId> = Vec::new();
+    let Some(assets) = manifest.get("assets").and_then(JsonValue::as_array) else {
+        return Vec::new();
+    };
+
+    for asset in assets {
+        let Some(asset_id) = asset.get("id").and_then(JsonValue::as_str) else {
+            continue;
+        };
+        candidates.push(ordered_asset_id(asset, asset_id));
+    }
+
+    candidates.sort_by_key(|candidate| candidate.preferred_order);
+    candidates
+        .into_iter()
+        .map(|candidate| candidate.asset_id)
+        .collect()
+}
+
+fn ordered_asset_id(value: &JsonValue, asset_id: &str) -> OrderedAssetId {
+    OrderedAssetId {
+        preferred_order: value
+            .get("preferredOrder")
+            .and_then(JsonValue::as_i64)
+            .unwrap_or(i64::MAX),
+        asset_id: asset_id.to_string(),
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OrderedAssetId {
+    preferred_order: i64,
+    asset_id: String,
+}
+
 fn unique_destination(dir: &Path, filename: &std::ffi::OsStr) -> PathBuf {
     let candidate = dir.join(filename);
     if !candidate.exists() {
@@ -206,6 +312,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::paths::WallctlPaths;
+    use crate::profile::{analyze_profile, AERIAL_PROVIDER};
 
     use super::{prepare_captured_profile, restore_required_assets};
 
@@ -266,5 +373,70 @@ mod tests {
             .restored_aerial_asset
             .unwrap();
         assert!(restored.is_file());
+    }
+
+    #[test]
+    fn promotes_default_wallpaper_to_manifest_aerial_asset_on_capture() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let asset_id = "4C108785-A7BA-422E-9C79-B0129F1D5550";
+        let cache_asset = paths.aerial_cache.join(format!("{asset_id}.mov"));
+        fs::create_dir_all(cache_asset.parent().unwrap()).unwrap();
+        fs::write(&cache_asset, b"movie").unwrap();
+        fs::create_dir_all(paths.aerial_manifest_entries.parent().unwrap()).unwrap();
+        fs::write(
+            &paths.aerial_manifest_entries,
+            format!(
+                r#"{{
+                    "assets": [
+                        {{"id": "{asset_id}", "preferredOrder": 1}}
+                    ],
+                    "categories": [
+                        {{
+                            "preferredOrder": 0,
+                            "subcategories": [
+                                {{
+                                    "preferredOrder": -1,
+                                    "representativeAssetID": "{asset_id}"
+                                }}
+                            ]
+                        }}
+                    ]
+                }}"#
+            ),
+        )
+        .unwrap();
+
+        let mut profile = {
+            let mut choice = Dictionary::new();
+            choice.insert("Provider".to_string(), Value::String("default".to_string()));
+            choice.insert("Configuration".to_string(), Value::Data(Vec::new()));
+            let mut content = Dictionary::new();
+            content.insert(
+                "Choices".to_string(),
+                Value::Array(vec![Value::Dictionary(choice)]),
+            );
+            let mut linked = Dictionary::new();
+            linked.insert("Content".to_string(), Value::Dictionary(content));
+            let mut all = Dictionary::new();
+            all.insert("Linked".to_string(), Value::Dictionary(linked));
+            let mut root = Dictionary::new();
+            root.insert("AllSpacesAndDisplays".to_string(), Value::Dictionary(all));
+            Value::Dictionary(root)
+        };
+
+        let report = prepare_captured_profile(&paths, "aerial", &mut profile).unwrap();
+        let info = analyze_profile(&profile).unwrap();
+
+        assert_eq!(info.provider, AERIAL_PROVIDER);
+        assert_eq!(info.aerial_asset_id.as_deref(), Some(asset_id));
+        assert_eq!(
+            report.backed_up_aerial_asset,
+            Some(
+                paths
+                    .aerial_assets_dir("aerial")
+                    .join(format!("{asset_id}.mov"))
+            )
+        );
     }
 }

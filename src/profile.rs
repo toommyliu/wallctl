@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use crate::config::ApplyMode;
 
 pub const AERIAL_PROVIDER: &str = "com.apple.wallpaper.choice.aerials";
+pub const DEFAULT_PROVIDER: &str = "default";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProfileInfo {
@@ -127,6 +128,15 @@ pub fn extract_aerial_asset_id(value: &Value) -> Option<String> {
     }
 
     find_string_key(value, "assetID")
+}
+
+pub fn has_default_wallpaper_provider(value: &Value) -> bool {
+    wallpaper_provider(value).as_deref() == Some(DEFAULT_PROVIDER)
+}
+
+pub fn promote_default_aerial_profile(value: &mut Value, asset_id: &str) -> Result<usize> {
+    let configuration = aerial_configuration_data(asset_id)?;
+    Ok(promote_default_aerial_profile_inner(value, &configuration))
 }
 
 pub fn rewrite_file_references<F>(
@@ -302,6 +312,50 @@ fn asset_id_from_plist_bytes(bytes: &[u8]) -> Option<String> {
     Value::from_reader(Cursor::new(bytes))
         .ok()
         .and_then(|value| find_string_key(&value, "assetID"))
+}
+
+fn aerial_configuration_data(asset_id: &str) -> Result<Vec<u8>> {
+    let mut dict = Dictionary::new();
+    dict.insert("assetID".to_string(), Value::String(asset_id.to_string()));
+    let mut bytes = Vec::new();
+    Value::Dictionary(dict)
+        .to_writer_binary(&mut bytes)
+        .context("failed to serialize Aerial asset configuration")?;
+    Ok(bytes)
+}
+
+fn promote_default_aerial_profile_inner(value: &mut Value, configuration: &[u8]) -> usize {
+    match value {
+        Value::Dictionary(dict) => {
+            let mut promoted = 0;
+            if matches!(
+                dict.get("Provider"),
+                Some(Value::String(provider)) if provider == DEFAULT_PROVIDER
+            ) {
+                dict.insert(
+                    "Provider".to_string(),
+                    Value::String(AERIAL_PROVIDER.to_string()),
+                );
+                dict.insert(
+                    "Configuration".to_string(),
+                    Value::Data(configuration.to_vec()),
+                );
+                promoted += 1;
+            }
+
+            if !matches!(dict.get("assetID"), Some(Value::String(_))) {
+                for child in dict.values_mut() {
+                    promoted += promote_default_aerial_profile_inner(child, configuration);
+                }
+            }
+            promoted
+        }
+        Value::Array(values) => values
+            .iter_mut()
+            .map(|child| promote_default_aerial_profile_inner(child, configuration))
+            .sum(),
+        _ => 0,
+    }
 }
 
 fn collect_file_references(value: &Value, output: &mut Vec<PathBuf>) {
@@ -485,7 +539,8 @@ mod tests {
 
     use super::{
         controlled_value, extract_aerial_asset_id, fingerprint, merge_for_apply,
-        resolved_apply_mode, wallpaper_provider, write_profile, AERIAL_PROVIDER,
+        promote_default_aerial_profile, resolved_apply_mode, wallpaper_provider, write_profile,
+        AERIAL_PROVIDER,
     };
 
     fn sample_profile(provider: &str) -> Value {
@@ -638,6 +693,23 @@ mod tests {
         config.insert("assetID".to_string(), Value::String("asset-1".to_string()));
         assert_eq!(
             extract_aerial_asset_id(&Value::Dictionary(config)),
+            Some("asset-1".to_string())
+        );
+    }
+
+    #[test]
+    fn promotes_default_provider_to_explicit_aerial_asset() {
+        let mut profile = sample_profile("default");
+
+        let promoted = promote_default_aerial_profile(&mut profile, "asset-1").unwrap();
+
+        assert_eq!(promoted, 1);
+        assert_eq!(
+            wallpaper_provider(&profile),
+            Some(AERIAL_PROVIDER.to_string())
+        );
+        assert_eq!(
+            extract_aerial_asset_id(&profile),
             Some("asset-1".to_string())
         );
     }

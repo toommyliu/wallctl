@@ -15,6 +15,7 @@ pub struct WallctlPaths {
     pub scheduler_stderr: PathBuf,
     pub wallpaper_index: PathBuf,
     pub aerial_cache: PathBuf,
+    pub aerial_manifest_entries: PathBuf,
 }
 
 impl WallctlPaths {
@@ -34,6 +35,8 @@ impl WallctlPaths {
             home.join("Library/Application Support/com.apple.wallpaper/Store/Index.plist");
         let aerial_cache =
             home.join("Library/Application Support/com.apple.wallpaper/aerials/videos");
+        let aerial_manifest_entries = home
+            .join("Library/Application Support/com.apple.wallpaper/aerials/manifest/entries.json");
 
         Self {
             home,
@@ -49,6 +52,7 @@ impl WallctlPaths {
             scheduler_stderr,
             wallpaper_index,
             aerial_cache,
+            aerial_manifest_entries,
         }
     }
 

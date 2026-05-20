@@ -217,6 +217,7 @@ where
                     kind: NewKind::Schedule(NewScheduleArgs {
                         name,
                         preset: preset.preset_arg(),
+                        slots: Vec::new(),
                     }),
                 }
             }
@@ -244,21 +245,36 @@ where
     fn new_collection(&self, args: NewArgs) -> Result<()> {
         storage::ensure_base_dirs(&self.paths)?;
 
-        let (kind, name, preset) = match args.kind {
-            NewKind::Static(args) => (Strategy::Static, args.name, None),
-            NewKind::Dynamic(args) => (Strategy::Dynamic, args.name, None),
-            NewKind::Schedule(args) => (Strategy::Schedule, args.name, args.preset.map(Into::into)),
+        let (kind, name, preset, slots) = match args.kind {
+            NewKind::Static(args) => (Strategy::Static, args.name, None, Vec::new()),
+            NewKind::Dynamic(args) => (Strategy::Dynamic, args.name, None, Vec::new()),
+            NewKind::Schedule(args) => {
+                let slots = args.slots.into_iter().map(Into::into).collect();
+                (
+                    Strategy::Schedule,
+                    args.name,
+                    args.preset.map(Into::into),
+                    slots,
+                )
+            }
         };
+        if preset.is_some() && !slots.is_empty() {
+            bail!("use either --preset or --slot, not both");
+        }
         let slug = slugify(&name);
         if slug.is_empty() {
             bail!("collection name '{name}' does not contain any usable slug characters");
         }
         let title = title_from_input(&name);
-        let config = match kind {
+        let mut config = match kind {
             Strategy::Static => CollectionConfig::new_static(slug, title),
             Strategy::Dynamic => CollectionConfig::new_dynamic(slug, title),
             Strategy::Schedule => CollectionConfig::new_schedule(slug, title, preset),
         };
+        if matches!(config.strategy, Strategy::Schedule) && !slots.is_empty() {
+            crate::config::validate_slots(&slots)?;
+            config.slots = slots;
+        }
 
         storage::write_collection(&self.paths, &config)?;
         self.log_event(&format!(
@@ -909,7 +925,10 @@ mod tests {
     use plist::{Dictionary, Value};
     use tempfile::TempDir;
 
-    use crate::cli::{ApplyArgs, Cli, CollectionArg, Command, NewArgs, NewCollectionArgs, NewKind};
+    use crate::cli::{
+        ApplyArgs, Cli, CollectionArg, Command, NewArgs, NewCollectionArgs, NewKind,
+        NewScheduleArgs, ScheduleSlotArg,
+    };
     use crate::clock::tests::FixedClock;
     use crate::config::{CollectionConfig, Preset};
     use crate::paths::WallctlPaths;
@@ -956,6 +975,66 @@ mod tests {
         .unwrap();
 
         assert!(paths.collection_config("focus-mode").is_file());
+    }
+
+    #[test]
+    fn creates_schedule_collection_with_custom_slots() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let app = App::new(
+            paths.clone(),
+            FakeRunner::default(),
+            FixedClock { hour: 12 },
+        );
+
+        app.run(Cli {
+            command: Some(Command::New(NewArgs {
+                kind: NewKind::Schedule(NewScheduleArgs {
+                    name: "Work Day".to_string(),
+                    preset: None,
+                    slots: vec![
+                        ScheduleSlotArg {
+                            hour: 8,
+                            profile: "morning".to_string(),
+                        },
+                        ScheduleSlotArg {
+                            hour: 14,
+                            profile: "afternoon".to_string(),
+                        },
+                    ],
+                }),
+            })),
+        })
+        .unwrap();
+
+        let config = storage::read_collection(&paths, "work-day").unwrap();
+        assert_eq!(config.slots.len(), 2);
+        assert_eq!(config.slots[0].hour, 8);
+        assert_eq!(config.slots[0].profile, "morning");
+        assert_eq!(config.slots[1].hour, 14);
+        assert_eq!(config.slots[1].profile, "afternoon");
+    }
+
+    #[test]
+    fn schedule_creation_rejects_preset_and_custom_slots_together() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let app = App::new(paths, FakeRunner::default(), FixedClock { hour: 12 });
+
+        let result = app.run(Cli {
+            command: Some(Command::New(NewArgs {
+                kind: NewKind::Schedule(NewScheduleArgs {
+                    name: "Work Day".to_string(),
+                    preset: Some(crate::cli::PresetArg::Three),
+                    slots: vec![ScheduleSlotArg {
+                        hour: 8,
+                        profile: "morning".to_string(),
+                    }],
+                }),
+            })),
+        });
+
+        assert!(result.is_err());
     }
 
     #[test]

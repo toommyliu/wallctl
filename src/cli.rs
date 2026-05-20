@@ -1,6 +1,8 @@
+use std::str::FromStr;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::config::Preset;
+use crate::config::{normalize_profile_name, Preset, ScheduleSlot};
 
 #[derive(Debug, Parser)]
 #[command(name = "wallctl")]
@@ -79,6 +81,9 @@ pub struct NewScheduleArgs {
     pub name: String,
     #[arg(long, value_enum)]
     pub preset: Option<PresetArg>,
+    /// Add a custom schedule slot as HOUR:PROFILE, for example 6:morning.
+    #[arg(long = "slot", value_name = "HOUR:PROFILE")]
+    pub slots: Vec<ScheduleSlotArg>,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -93,6 +98,41 @@ impl From<PresetArg> for Preset {
             PresetArg::Three => Preset::Three,
             PresetArg::Four => Preset::Four,
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleSlotArg {
+    pub hour: u8,
+    pub profile: String,
+}
+
+impl From<ScheduleSlotArg> for ScheduleSlot {
+    fn from(value: ScheduleSlotArg) -> Self {
+        Self {
+            hour: value.hour,
+            profile: value.profile,
+        }
+    }
+}
+
+impl FromStr for ScheduleSlotArg {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (hour, profile) = value
+            .split_once(':')
+            .or_else(|| value.split_once('='))
+            .ok_or_else(|| "expected HOUR:PROFILE".to_string())?;
+        let hour: u8 = hour
+            .parse()
+            .map_err(|_| format!("invalid schedule hour '{hour}'"))?;
+        if hour > 23 {
+            return Err(format!("schedule hour {hour} is out of range"));
+        }
+        let profile = normalize_profile_name(profile).map_err(|err| err.to_string())?;
+
+        Ok(Self { hour, profile })
     }
 }
 
@@ -116,4 +156,40 @@ pub struct HeicArgs {
     /// Replace the output file if it already exists.
     #[arg(long)]
     pub force: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command, NewKind};
+
+    #[test]
+    fn parses_custom_schedule_slots() {
+        let cli = Cli::try_parse_from([
+            "wallctl",
+            "new",
+            "schedule",
+            "Work Day",
+            "--slot",
+            "08:morning",
+            "--slot",
+            "13:afternoon",
+        ])
+        .unwrap();
+
+        let Some(Command::New(args)) = cli.command else {
+            panic!("expected new command");
+        };
+        let NewKind::Schedule(args) = args.kind else {
+            panic!("expected schedule command");
+        };
+
+        assert_eq!(args.name, "Work Day");
+        assert_eq!(args.slots.len(), 2);
+        assert_eq!(args.slots[0].hour, 8);
+        assert_eq!(args.slots[0].profile, "morning");
+        assert_eq!(args.slots[1].hour, 13);
+        assert_eq!(args.slots[1].profile, "afternoon");
+    }
 }

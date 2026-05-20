@@ -1,28 +1,25 @@
 # wallctl
 
-`wallctl` is a macOS wallpaper profile controller. It captures the current
-wallpaper state as a reusable profile, groups profiles into collections, and can
-switch collections manually or on a fixed hourly schedule.
+`wallctl` is a macOS wallpaper profile controller. It captures the wallpaper
+configuration that macOS is using right now, stores it as a reusable profile,
+and can reapply that profile later from the command line or an interactive menu.
 
-The usual workflow is:
+The main unit is a collection. A collection can be static, dynamic, or scheduled:
+static collections apply one saved profile, dynamic collections let macOS handle
+native dynamic wallpapers such as light/dark HEIC files, and scheduled
+collections switch between named profiles at fixed hours.
+Use `static` for one saved setup, `dynamic` for macOS-managed dynamic wallpaper
+files, and `schedule` when `wallctl` should choose profiles by hour.
 
-1. Configure a wallpaper in macOS System Settings.
-2. Capture that state with `wallctl`.
-3. Repeat for each profile you want.
-4. Apply a profile once or activate a collection.
+`wallctl` is designed to keep captured wallpapers durable. Image and HEIC files
+referenced by macOS are copied into `wallctl` storage, so profiles can keep
+working after the original file is moved or deleted. Apple Aerial video assets
+are backed up when possible.
 
 ## Install
 
-From this checkout:
-
 ```bash
 ./scripts/install.sh
-```
-
-That runs:
-
-```bash
-cargo install --path . --locked
 ```
 
 For development:
@@ -31,77 +28,28 @@ For development:
 cargo run -- <command>
 ```
 
-## Interactive Menu
+Run `wallctl` with no command to use the interactive menu. Most commands also
+work well directly from the shell, which is useful for scheduled dispatch and
+repeatable setup.
 
-Run `wallctl` with no command to open the menu:
+## Basic Workflow
 
-```bash
-wallctl
-```
+The usual flow starts in System Settings. Pick the wallpaper you want, then ask
+`wallctl` to capture that live macOS state into a collection. After that, you can
+apply the captured profile once with `wallctl apply`, or make the collection the
+active wallpaper source with `wallctl use`.
 
-The menu can list, inspect, activate, capture, apply, remove, show status, and
-print logs. Command help is still available directly:
+Collection names become slugs, such as `Focus Mode` to `focus-mode`.
 
-```bash
-wallctl --help
-wallctl help
-wallctl help use
-```
-
-Common commands that need a collection can also open a picker when run in an
-interactive terminal:
-
-```bash
-wallctl use
-wallctl inspect
-wallctl apply
-wallctl capture
-wallctl remove
-```
-
-Use exact collection slugs in scripts and non-interactive shells.
-
-## Concepts
-
-A collection is what you activate. It has one strategy:
-
-- `static`: one captured profile.
-- `dynamic`: one captured profile that macOS changes itself, such as a dynamic
-  HEIC wallpaper.
-- `schedule`: multiple captured profiles selected by fixed hour-of-day slots.
-
-A profile is a captured snapshot of the current macOS wallpaper plist. For image
-and HEIC wallpapers, `wallctl` copies the referenced asset into the collection
-so the profile can keep working if the original file is deleted. For Apple
-Aerial wallpapers, it stores a backup of the matching `.mov` when possible.
-
-Collection names become slugs:
-
-```bash
-wallctl new static "Focus Mode"
-# slug: focus-mode
-```
-
-## Common Workflows
-
-### Static Wallpaper
-
-Use this for one saved wallpaper setup.
+Static collection:
 
 ```bash
 wallctl new static "Focus Mode"
 wallctl capture focus-mode
-wallctl inspect focus-mode
-wallctl apply focus-mode
 wallctl use focus-mode
 ```
 
-`apply` applies the profile once. `use` makes the collection active.
-
-### Dynamic Wallpaper
-
-Use this for a macOS-native dynamic wallpaper. If you already have a dynamic
-HEIC, set it in System Settings first, then capture it:
+Dynamic collection:
 
 ```bash
 wallctl new dynamic "Day Night"
@@ -109,7 +57,7 @@ wallctl capture day-night
 wallctl use day-night
 ```
 
-To create a light/dark HEIC from two images:
+If you have separate light and dark images, create a dynamic HEIC first:
 
 ```bash
 wallctl heic \
@@ -118,34 +66,12 @@ wallctl heic \
   --output ~/Pictures/wallpaper-dynamic.heic
 ```
 
-The light and dark source images must have the same pixel dimensions.
+## Schedules
 
-### Scheduled Wallpaper
+Schedules are fixed hour slots. Each slot is `HOUR:PROFILE`, using an hour from
+`0` through `23`.
 
-Use this for fixed hourly slots.
-
-```bash
-wallctl new schedule "Aerial Day" --preset four
-```
-
-The `four` preset creates:
-
-```text
-06 morning
-10 day
-17 evening
-20 night
-```
-
-The `three` preset creates:
-
-```text
-06 morning
-10 day
-19 night
-```
-
-You can also define the slots yourself instead of using a preset:
+Custom schedule:
 
 ```bash
 wallctl new schedule "Work Day" \
@@ -154,27 +80,35 @@ wallctl new schedule "Work Day" \
   --slot 18:evening
 ```
 
-Each slot is `HOUR:PROFILE`, where `HOUR` is `0` through `23`. At runtime,
-`wallctl` picks the latest slot at or before the current hour. Before the first
-slot of the day, it wraps to the last slot from the previous day.
-
-Capture each slot after setting the matching wallpaper in System Settings:
+Then set each wallpaper in System Settings and capture it with the matching
+profile name:
 
 ```bash
-wallctl capture aerial-day morning
-wallctl capture aerial-day day
-wallctl capture aerial-day evening
-wallctl capture aerial-day night
+wallctl capture work-day morning
+wallctl capture work-day afternoon
+wallctl capture work-day evening
+wallctl use work-day
 ```
 
-Then activate the schedule:
+At runtime, `wallctl` picks the latest slot at or before the current hour. Before
+the first slot of the day, it wraps to the last slot from the previous day. A
+schedule can have at most one slot per hour, so the practical maximum is 24
+slots.
+
+Presets are available if you want common defaults:
 
 ```bash
-wallctl inspect aerial-day
-wallctl use aerial-day
+wallctl new schedule "Aerial Day" --preset four
 ```
 
-Activation fails until every scheduled slot has a captured, valid profile.
+Preset slots:
+
+```text
+three: 06 morning, 10 day, 19 night
+four:  06 morning, 10 day, 17 evening, 20 night
+```
+
+Activation fails until every slot has a captured, valid profile.
 
 ## Commands
 
@@ -185,9 +119,9 @@ wallctl inspect [collection-slug]
 
 wallctl new static <name>
 wallctl new dynamic <name>
+wallctl new schedule <name> --slot <hour:profile> [--slot <hour:profile> ...]
 wallctl new schedule <name> --preset three
 wallctl new schedule <name> --preset four
-wallctl new schedule <name> --slot <hour:profile> [--slot <hour:profile> ...]
 
 wallctl capture [collection-slug] [profile-name]
 wallctl apply [collection-slug] [profile-name]
@@ -202,66 +136,47 @@ wallctl logs
 wallctl remove [collection-slug]
 ```
 
-`remove` only works for inactive collections. Activate another collection first
-if needed.
+Commands that accept an optional collection open a picker in an interactive
+terminal. Use exact slugs in scripts.
 
-## Data Locations
+## Data
 
-`wallctl` stores its own data here:
+`wallctl` stores collection data in:
 
 ```text
 ~/Library/Application Support/wallctl/
-  state.toml
-  collections/
-  logs/wallctl.log
 ```
 
-Scheduler logs live here:
+Scheduler logs live in:
 
 ```text
 ~/Library/Logs/wallctl/
-  scheduler.out.log
-  scheduler.err.log
 ```
 
-Scheduled collections use this per-user LaunchAgent:
+Scheduled collections use:
 
 ```text
 ~/Library/LaunchAgents/local.wallctl.scheduler.plist
 ```
 
+Captured image and HEIC wallpaper assets are copied into the collection so they
+keep working if the original file is deleted. Apple Aerial `.mov` files are
+backed up when possible.
+
 ## Troubleshooting
 
-If `wallctl status` says the live wallpaper has drifted, reapply the active
-collection:
+If `wallctl status` reports drift, reapply the active collection:
 
 ```bash
 wallctl use <collection-slug>
 ```
 
-If a scheduled collection will not activate, inspect it:
+If a schedule will not activate, run:
 
 ```bash
 wallctl inspect <collection-slug>
 ```
 
-Common causes:
-
-- A scheduled profile has not been captured yet.
-- A profile is missing a wallpaper provider.
-- A copied image asset was removed from the collection.
-- An Aerial profile is missing its `assetID`.
-- An Aerial `.mov` is missing from both Apple's cache and the collection backup.
-
-If a command asks for an exact slug, run:
-
-```bash
-wallctl list
-```
-
-If the installed command is not found after `./scripts/install.sh`, add Cargo's
-bin directory to your shell path:
-
-```bash
-export PATH="$HOME/.cargo/bin:$PATH"
-```
+Common causes are missing slot captures, missing copied assets, invalid profile
+metadata, or an Aerial asset that is missing from both Apple's cache and the
+collection backup.

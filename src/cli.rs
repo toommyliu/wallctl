@@ -27,6 +27,8 @@ pub enum Command {
     Apply(ApplyArgs),
     /// Apply the active scheduled collection's current slot.
     Dispatch(DispatchArgs),
+    /// Manage the wallctl background service.
+    Service(ServiceArgs),
     /// Print wallctl and scheduler logs.
     Logs,
     /// Remove a collection. Active collections cannot be removed.
@@ -37,6 +39,105 @@ pub enum Command {
     Capture(CaptureArgs),
     /// Create dynamic HEIC wallpaper assets.
     Heic(HeicArgs),
+    /// Machine-readable JSON API for GUI clients.
+    Api(ApiArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ApiArgs {
+    #[command(subcommand)]
+    pub command: ApiCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ApiCommand {
+    /// Return the preview catalog as JSON.
+    Catalog,
+    /// Return active collection status as JSON.
+    Status,
+    /// Return recent wallctl logs as JSON.
+    Logs(ApiLogsArgs),
+    /// Activate a collection through the normal wallctl use path.
+    Use(CollectionArg),
+    /// Apply one profile through the normal wallctl apply path.
+    Apply(ApplyArgs),
+    /// Capture the current macOS wallpaper profile.
+    Capture(CaptureArgs),
+    /// Remove a collection.
+    Remove(CollectionArg),
+    /// Create a new collection.
+    New(NewArgs),
+    /// Create dynamic HEIC wallpaper assets.
+    Heic(HeicArgs),
+    /// Manage the wallctl background service.
+    Service(ServiceArgs),
+    /// Read or update companion live wallpaper settings.
+    Live(ApiLiveArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ServiceArgs {
+    #[command(subcommand)]
+    pub command: ServiceCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ServiceCommand {
+    /// Stop and clean up the scheduler LaunchAgent.
+    #[command(alias = "cleanup")]
+    Stop,
+}
+
+#[derive(Debug, Args)]
+pub struct ApiLogsArgs {
+    #[arg(long, default_value_t = 40)]
+    pub lines: usize,
+}
+
+#[derive(Debug, Args)]
+pub struct ApiLiveArgs {
+    #[command(subcommand)]
+    pub command: ApiLiveCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ApiLiveCommand {
+    /// Return companion live settings.
+    Get,
+    /// Assign a video file to a collection profile.
+    SetAssignment(ApiLiveAssignmentArgs),
+    /// Clear the assigned video for a collection profile.
+    ClearAssignment(ApiLiveProfileArgs),
+    /// Update companion live preferences.
+    SetPreferences(ApiLivePreferencesArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ApiLiveAssignmentArgs {
+    pub collection: String,
+    pub profile: String,
+    #[arg(long)]
+    pub video: std::path::PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct ApiLiveProfileArgs {
+    pub collection: String,
+    pub profile: String,
+}
+
+#[derive(Debug, Args)]
+pub struct ApiLivePreferencesArgs {
+    #[arg(long)]
+    pub enabled: Option<bool>,
+    #[arg(long)]
+    pub follow_active_collection: Option<bool>,
+    #[arg(long)]
+    pub pinned_collection: Option<String>,
+    #[arg(long)]
+    pub clear_pinned_collection: bool,
+    #[arg(long)]
+    pub pause_on_battery: Option<bool>,
 }
 
 #[derive(Debug, Args)]

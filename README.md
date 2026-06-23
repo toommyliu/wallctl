@@ -128,6 +128,7 @@ wallctl apply [collection-slug] [profile-name]
 wallctl apply --force <collection-slug> <profile-name>
 wallctl use [collection-slug]
 wallctl dispatch [--force]
+wallctl service stop
 
 wallctl heic --light <light-image> --dark <dark-image> --output <output.heic>
 wallctl heic --light <light-image> --dark <dark-image> --output <output.heic> --force
@@ -157,6 +158,12 @@ Scheduled collections use:
 
 ```text
 ~/Library/LaunchAgents/local.wallctl.scheduler.plist
+```
+
+To stop the scheduler and remove its LaunchAgent:
+
+```bash
+wallctl service stop
 ```
 
 Captured image and HEIC wallpaper assets are copied into the collection so they

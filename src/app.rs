@@ -8,10 +8,11 @@ use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
+use crate::api::{ApiEnvelope, ApiStatus};
 use crate::assets;
 use crate::cli::{
-    ApplyArgs, CaptureArgs, Cli, CollectionArg, Command, HeicArgs, NewArgs, NewCollectionArgs,
-    NewKind, NewScheduleArgs, PresetArg,
+    ApiArgs, ApiCommand, ApiLiveCommand, ApplyArgs, CaptureArgs, Cli, CollectionArg, Command,
+    HeicArgs, NewArgs, NewCollectionArgs, NewKind, NewScheduleArgs, PresetArg, ServiceCommand,
 };
 use crate::clock::Clock;
 use crate::config::{
@@ -19,6 +20,7 @@ use crate::config::{
 };
 use crate::heic;
 use crate::launch_agent;
+use crate::live::{self, LivePreferencesUpdate};
 use crate::paths::WallctlPaths;
 use crate::profile::{self, ProfileInfo};
 use crate::runner::CommandRunner;
@@ -128,11 +130,15 @@ where
             Some(Command::Use(args)) => self.use_collection(args.collection.as_deref()),
             Some(Command::Apply(args)) => self.apply_command(&args),
             Some(Command::Dispatch(args)) => self.dispatch(args.force),
+            Some(Command::Service(args)) => match args.command {
+                ServiceCommand::Stop => self.stop_service_command(),
+            },
             Some(Command::Logs) => self.logs(),
             Some(Command::Remove(args)) => self.remove(args.collection.as_deref()),
             Some(Command::New(args)) => self.new_collection(args),
             Some(Command::Capture(args)) => self.capture(&args),
             Some(Command::Heic(args)) => self.create_heic(&args),
+            Some(Command::Api(args)) => self.api(&args),
             None => self.interactive_menu(),
         }
     }
@@ -240,6 +246,330 @@ where
             output,
             force,
         })
+    }
+
+    fn api(&self, args: &ApiArgs) -> Result<()> {
+        let result = self.api_value(args);
+        let envelope = match result {
+            Ok(value) => ApiEnvelope::success(value),
+            Err(error) => ApiEnvelope::failure(&error),
+        };
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        serde_json::to_writer_pretty(&mut handle, &envelope)
+            .context("failed to serialize API response")?;
+        writeln!(handle).context("failed to write API response")?;
+        Ok(())
+    }
+
+    fn api_value(&self, args: &ApiArgs) -> Result<serde_json::Value> {
+        match &args.command {
+            ApiCommand::Catalog => serde_json::to_value(crate::preview::load_catalog(&self.paths)?)
+                .context("failed to encode catalog"),
+            ApiCommand::Status => {
+                serde_json::to_value(self.api_status()?).context("failed to encode status")
+            }
+            ApiCommand::Logs(args) => {
+                serde_json::to_value(self.api_logs(args.lines)?).context("failed to encode logs")
+            }
+            ApiCommand::Use(args) => {
+                serde_json::to_value(self.api_use(args.collection.as_deref())?)
+                    .context("failed to encode use response")
+            }
+            ApiCommand::Apply(args) => serde_json::to_value(self.api_apply(args)?)
+                .context("failed to encode apply response"),
+            ApiCommand::Capture(args) => serde_json::to_value(self.api_capture(args)?)
+                .context("failed to encode capture response"),
+            ApiCommand::Remove(args) => {
+                serde_json::to_value(self.api_remove(args.collection.as_deref())?)
+                    .context("failed to encode remove response")
+            }
+            ApiCommand::New(args) => serde_json::to_value(self.api_new_collection(args)?)
+                .context("failed to encode new collection response"),
+            ApiCommand::Heic(args) => serde_json::to_value(self.api_create_heic(args)?)
+                .context("failed to encode HEIC response"),
+            ApiCommand::Service(args) => match &args.command {
+                ServiceCommand::Stop => serde_json::to_value(self.stop_service()?)
+                    .context("failed to encode service stop response"),
+            },
+            ApiCommand::Live(args) => match &args.command {
+                ApiLiveCommand::Get => serde_json::to_value(live::read_live_config(&self.paths)?)
+                    .context("failed to encode live config"),
+                ApiLiveCommand::SetAssignment(args) => serde_json::to_value(live::set_assignment(
+                    &self.paths,
+                    &args.collection,
+                    &args.profile,
+                    &args.video,
+                )?)
+                .context("failed to encode live config"),
+                ApiLiveCommand::ClearAssignment(args) => serde_json::to_value(
+                    live::clear_assignment(&self.paths, &args.collection, &args.profile)?,
+                )
+                .context("failed to encode live config"),
+                ApiLiveCommand::SetPreferences(args) => {
+                    let pinned_collection = if args.clear_pinned_collection {
+                        Some(None)
+                    } else {
+                        args.pinned_collection.clone().map(Some)
+                    };
+                    serde_json::to_value(live::update_preferences(
+                        &self.paths,
+                        LivePreferencesUpdate {
+                            enabled: args.enabled,
+                            follow_active_collection: args.follow_active_collection,
+                            pinned_collection,
+                            pause_on_battery: args.pause_on_battery,
+                        },
+                    )?)
+                    .context("failed to encode live config")
+                }
+            },
+        }
+    }
+
+    fn api_status(&self) -> Result<ApiStatus> {
+        let state = storage::read_state(&self.paths)?;
+        let mut issues = Vec::new();
+        let mut expected_profile = None;
+        let mut live_matches_profile = None;
+
+        if let Some(active) = state.active_collection.as_deref() {
+            match storage::read_collection(&self.paths, active) {
+                Ok(config) => match self.profile_name_for_activation(&config) {
+                    Ok(profile_name) => {
+                        expected_profile = Some(profile_name.clone());
+                        match self.load_profile(&config, &profile_name) {
+                            Ok(loaded) => {
+                                let apply_mode =
+                                    profile::resolved_apply_mode(config.apply_mode, &loaded.info);
+                                match wallpaper::live_matches_profile(
+                                    &self.paths,
+                                    &loaded.value,
+                                    apply_mode,
+                                ) {
+                                    Ok(matches) => live_matches_profile = Some(matches),
+                                    Err(error) => issues.push(format!("{error:#}")),
+                                }
+                            }
+                            Err(error) => issues.push(format!("{error:#}")),
+                        }
+                    }
+                    Err(error) => issues.push(format!("{error:#}")),
+                },
+                Err(error) => issues.push(format!("{error:#}")),
+            }
+        }
+
+        Ok(ApiStatus {
+            active_collection: state.active_collection,
+            expected_profile,
+            last_applied_profile: state.last_applied_profile,
+            last_applied_at: state.last_applied_at,
+            live_matches_profile,
+            issues,
+        })
+    }
+
+    fn api_logs(&self, lines: usize) -> Result<serde_json::Value> {
+        let logs = [
+            ("wallctl", &self.paths.wallctl_log),
+            ("scheduler_stdout", &self.paths.scheduler_stdout),
+            ("scheduler_stderr", &self.paths.scheduler_stderr),
+        ]
+        .into_iter()
+        .map(|(name, path)| {
+            let lines = fs::read_to_string(path)
+                .ok()
+                .map(|content| {
+                    content
+                        .lines()
+                        .rev()
+                        .take(lines)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            serde_json::json!({
+                "name": name,
+                "path": path,
+                "lines": lines,
+            })
+        })
+        .collect::<Vec<_>>();
+
+        Ok(serde_json::json!({ "logs": logs }))
+    }
+
+    fn api_new_collection(&self, args: &NewArgs) -> Result<CollectionConfig> {
+        storage::ensure_base_dirs(&self.paths)?;
+
+        let (kind, name, preset, slots) = match &args.kind {
+            NewKind::Static(args) => (Strategy::Static, args.name.clone(), None, Vec::new()),
+            NewKind::Dynamic(args) => (Strategy::Dynamic, args.name.clone(), None, Vec::new()),
+            NewKind::Schedule(args) => {
+                let slots = args.slots.iter().cloned().map(Into::into).collect();
+                (
+                    Strategy::Schedule,
+                    args.name.clone(),
+                    args.preset.map(Into::into),
+                    slots,
+                )
+            }
+        };
+        if preset.is_some() && !slots.is_empty() {
+            bail!("use either --preset or --slot, not both");
+        }
+        let slug = slugify(&name);
+        if slug.is_empty() {
+            bail!("collection name '{name}' does not contain any usable slug characters");
+        }
+        let title = title_from_input(&name);
+        let mut config = match kind {
+            Strategy::Static => CollectionConfig::new_static(slug, title),
+            Strategy::Dynamic => CollectionConfig::new_dynamic(slug, title),
+            Strategy::Schedule => CollectionConfig::new_schedule(slug, title, preset),
+        };
+        if matches!(config.strategy, Strategy::Schedule) && !slots.is_empty() {
+            crate::config::validate_slots(&slots)?;
+            config.slots = slots;
+        }
+
+        storage::write_collection(&self.paths, &config)?;
+        self.log_event(&format!(
+            "created {} collection '{}' through API",
+            config.strategy, config.name
+        ))?;
+        Ok(config)
+    }
+
+    fn api_capture(&self, args: &CaptureArgs) -> Result<serde_json::Value> {
+        storage::ensure_base_dirs(&self.paths)?;
+        let collection = self.resolve_collection_arg(args.collection.as_deref(), "api capture")?;
+        let config = storage::read_collection(&self.paths, &collection)?;
+        let profile_name = self.profile_name_for_capture(&config, args.profile.as_deref())?;
+
+        if !self.paths.wallpaper_index.is_file() {
+            bail!(
+                "source wallpaper profile not found: {}",
+                self.paths.wallpaper_index.display()
+            );
+        }
+
+        let mut profile = profile::read_profile(&self.paths.wallpaper_index)?;
+        let report = assets::prepare_captured_profile(&self.paths, &collection, &mut profile)?;
+        profile::validate_profile(&profile)?;
+        let target = self.paths.profile_path(&collection, &profile_name);
+        profile::write_profile(&target, &profile)?;
+        self.log_event(&format!(
+            "captured profile '{}' in collection '{}' through API",
+            profile_name, collection
+        ))?;
+
+        Ok(serde_json::json!({
+            "collection": collection,
+            "profile": profile_name,
+            "profile_path": target,
+            "copied_files": report.copied_files,
+            "backed_up_aerial_asset": report.backed_up_aerial_asset,
+        }))
+    }
+
+    fn api_apply(&self, args: &ApplyArgs) -> Result<serde_json::Value> {
+        let collection = self.resolve_collection_arg(args.collection.as_deref(), "api apply")?;
+        let config = storage::read_collection(&self.paths, &collection)?;
+        let profile_name = self.profile_name_for_apply(&config, args.profile.as_deref())?;
+        let outcome = self.apply_profile(&config, &profile_name, args.force)?;
+        self.log_event(&format!(
+            "applied collection '{}' profile '{}' through API{}",
+            config.name,
+            profile_name,
+            if args.force { " with --force" } else { "" }
+        ))?;
+
+        Ok(match outcome {
+            wallpaper::ApplyOutcome::Applied {
+                fingerprint,
+                restored_asset,
+            } => serde_json::json!({
+                "collection": config.name,
+                "profile": profile_name,
+                "outcome": "applied",
+                "fingerprint": fingerprint,
+                "restored_asset": restored_asset,
+            }),
+            wallpaper::ApplyOutcome::NoOp { fingerprint } => serde_json::json!({
+                "collection": config.name,
+                "profile": profile_name,
+                "outcome": "no-op",
+                "fingerprint": fingerprint,
+                "restored_asset": false,
+            }),
+        })
+    }
+
+    fn api_use(&self, raw_collection: Option<&str>) -> Result<serde_json::Value> {
+        storage::ensure_base_dirs(&self.paths)?;
+        let collection = self.resolve_collection_arg(raw_collection, "api use")?;
+        let config = storage::read_collection(&self.paths, &collection)?;
+        self.prepare_collection_for_activation(&config)?;
+
+        let selected_profile = match config.strategy {
+            Strategy::Static | Strategy::Dynamic => {
+                launch_agent::remove(&self.paths, &self.runner)?;
+                config.default_profile_name()?.to_string()
+            }
+            Strategy::Schedule => {
+                let binary =
+                    std::env::current_exe().context("failed to locate current wallctl binary")?;
+                launch_agent::install(&self.paths, &self.runner, &binary, &config.slots)?;
+                self.profile_name_for_activation(&config)?
+            }
+        };
+
+        let outcome = self.apply_profile(&config, &selected_profile, false)?;
+        self.write_active_state(&config.name, &selected_profile)?;
+        self.log_event(&format!(
+            "activated collection '{}' with profile '{}' through API",
+            config.name, selected_profile
+        ))?;
+
+        let outcome = match outcome {
+            wallpaper::ApplyOutcome::Applied { .. } => "applied",
+            wallpaper::ApplyOutcome::NoOp { .. } => "no-op",
+        };
+        Ok(serde_json::json!({
+            "collection": config.name,
+            "profile": selected_profile,
+            "outcome": outcome,
+        }))
+    }
+
+    fn api_remove(&self, raw_collection: Option<&str>) -> Result<serde_json::Value> {
+        let collection = self.resolve_collection_arg(raw_collection, "api remove")?;
+        storage::remove_collection(&self.paths, &collection)?;
+        self.log_event(&format!("removed collection '{collection}' through API"))?;
+        Ok(serde_json::json!({ "collection": collection }))
+    }
+
+    fn api_create_heic(&self, args: &HeicArgs) -> Result<serde_json::Value> {
+        let report = heic::create_light_dark_heic(heic::LightDarkHeicSpec {
+            light: args.light.clone(),
+            dark: args.dark.clone(),
+            output: args.output.clone(),
+            force: args.force,
+        })?;
+        self.log_event(&format!(
+            "created dynamic HEIC '{}' through API",
+            report.output.display()
+        ))?;
+        Ok(serde_json::json!({
+            "output": report.output,
+            "light": report.light,
+            "dark": report.dark,
+        }))
     }
 
     fn new_collection(&self, args: NewArgs) -> Result<()> {
@@ -605,6 +935,60 @@ where
         Ok(())
     }
 
+    fn stop_service_command(&self) -> Result<()> {
+        let report = self.stop_service()?;
+        println!("Stopped wallctl scheduler service.");
+        if report.launch_agent_plist_removed {
+            println!(
+                "Removed LaunchAgent: {}",
+                self.paths.path_in_home(&self.paths.launch_agent_plist)
+            );
+        } else {
+            println!(
+                "No LaunchAgent plist found at {}",
+                self.paths.path_in_home(&self.paths.launch_agent_plist)
+            );
+        }
+        if report.active_state_cleared {
+            println!("Cleared active scheduled collection state.");
+        } else if let Some(collection) = report.preserved_active_collection {
+            println!("Preserved active non-scheduled collection state: {collection}");
+        }
+        Ok(())
+    }
+
+    fn stop_service(&self) -> Result<ServiceStopReport> {
+        let launch_agent_plist_existed = self.paths.launch_agent_plist.exists();
+        launch_agent::remove(&self.paths, &self.runner)?;
+
+        let mut report = ServiceStopReport {
+            launch_agent_plist_removed: launch_agent_plist_existed
+                && !self.paths.launch_agent_plist.exists(),
+            active_state_cleared: false,
+            preserved_active_collection: None,
+        };
+
+        let state = storage::read_state(&self.paths)?;
+        if let Some(active) = state.active_collection.as_deref() {
+            match storage::read_collection(&self.paths, active) {
+                Ok(config) if config.strategy == Strategy::Schedule => {
+                    storage::write_state(&self.paths, &State::default())?;
+                    report.active_state_cleared = true;
+                }
+                Ok(_) => {
+                    report.preserved_active_collection = Some(active.to_string());
+                }
+                Err(_) => {
+                    storage::write_state(&self.paths, &State::default())?;
+                    report.active_state_cleared = true;
+                }
+            }
+        }
+
+        self.log_event("stopped scheduler service and cleaned LaunchAgent state")?;
+        Ok(report)
+    }
+
     fn remove(&self, raw_collection: Option<&str>) -> Result<()> {
         let collection = self.resolve_collection_arg(raw_collection, "remove")?;
         if raw_collection.is_none() && !confirm(&format!("Remove collection '{collection}'?"))? {
@@ -868,6 +1252,14 @@ where
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+struct ServiceStopReport {
+    pub launch_agent_plist_removed: bool,
+    pub active_state_cleared: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preserved_active_collection: Option<String>,
+}
+
 fn normalize_collection_slug(input: &str) -> Result<String> {
     let slug = slugify(input);
     if slug.is_empty() {
@@ -926,11 +1318,12 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::cli::{
-        ApplyArgs, Cli, CollectionArg, Command, NewArgs, NewCollectionArgs, NewKind,
-        NewScheduleArgs, ScheduleSlotArg,
+        ApiArgs, ApiCommand, ApiLiveArgs, ApiLiveAssignmentArgs, ApiLiveCommand, ApplyArgs, Cli,
+        CollectionArg, Command, NewArgs, NewCollectionArgs, NewKind, NewScheduleArgs,
+        ScheduleSlotArg, ServiceArgs, ServiceCommand,
     };
     use crate::clock::tests::FixedClock;
-    use crate::config::{CollectionConfig, Preset};
+    use crate::config::{CollectionConfig, Preset, State};
     use crate::paths::WallctlPaths;
     use crate::profile;
     use crate::runner::tests::FakeRunner;
@@ -975,6 +1368,58 @@ mod tests {
         .unwrap();
 
         assert!(paths.collection_config("focus-mode").is_file());
+    }
+
+    #[test]
+    fn api_new_collection_creates_collection() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let app = App::new(
+            paths.clone(),
+            FakeRunner::default(),
+            FixedClock { hour: 12 },
+        );
+
+        app.api_value(&ApiArgs {
+            command: ApiCommand::New(NewArgs {
+                kind: NewKind::Static(NewCollectionArgs {
+                    name: "Focus Mode".to_string(),
+                }),
+            }),
+        })
+        .unwrap();
+
+        assert!(paths.collection_config("focus-mode").is_file());
+    }
+
+    #[test]
+    fn api_live_assignment_writes_companion_config_without_state() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let app = App::new(
+            paths.clone(),
+            FakeRunner::default(),
+            FixedClock { hour: 12 },
+        );
+        let video = tmp.path().join("focus.mov");
+
+        app.api_value(&ApiArgs {
+            command: ApiCommand::Live(ApiLiveArgs {
+                command: ApiLiveCommand::SetAssignment(ApiLiveAssignmentArgs {
+                    collection: "focus".to_string(),
+                    profile: "default".to_string(),
+                    video: video.clone(),
+                }),
+            }),
+        })
+        .unwrap();
+
+        let config = crate::live::read_live_config(&paths).unwrap();
+        assert_eq!(
+            config.collections["focus"].profiles["default"].video_path,
+            Some(video)
+        );
+        assert!(!paths.state_file.exists());
     }
 
     #[test]
@@ -1089,6 +1534,83 @@ mod tests {
             .unwrap()
             .active_collection
             .is_none());
+    }
+
+    #[test]
+    fn service_stop_removes_launch_agent_and_clears_scheduled_state() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let config = CollectionConfig::new_schedule(
+            "work-day".to_string(),
+            "Work Day".to_string(),
+            Some(Preset::Three),
+        );
+        storage::write_collection(&paths, &config).unwrap();
+        storage::write_state(
+            &paths,
+            &State {
+                active_collection: Some("work-day".to_string()),
+                last_applied_profile: Some("day".to_string()),
+                last_applied_at: None,
+            },
+        )
+        .unwrap();
+        fs::create_dir_all(&paths.launch_agents).unwrap();
+        fs::write(&paths.launch_agent_plist, "<plist/>").unwrap();
+        let app = App::new(
+            paths.clone(),
+            FakeRunner::default(),
+            FixedClock { hour: 12 },
+        );
+
+        app.run(Cli {
+            command: Some(Command::Service(ServiceArgs {
+                command: ServiceCommand::Stop,
+            })),
+        })
+        .unwrap();
+
+        assert!(!paths.launch_agent_plist.exists());
+        assert_eq!(storage::read_state(&paths).unwrap(), State::default());
+        let commands = app.runner.commands.borrow();
+        assert_eq!(commands[0][0], "launchctl");
+        assert_eq!(commands[0][1], "unload");
+        assert_eq!(
+            commands[1],
+            vec!["launchctl", "remove", crate::launch_agent::LABEL]
+        );
+    }
+
+    #[test]
+    fn service_stop_preserves_active_static_state() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let config = CollectionConfig::new_static("focus".to_string(), "Focus".to_string());
+        storage::write_collection(&paths, &config).unwrap();
+        let state = State {
+            active_collection: Some("focus".to_string()),
+            last_applied_profile: Some("default".to_string()),
+            last_applied_at: None,
+        };
+        storage::write_state(&paths, &state).unwrap();
+        let app = App::new(
+            paths.clone(),
+            FakeRunner::default(),
+            FixedClock { hour: 12 },
+        );
+
+        app.run(Cli {
+            command: Some(Command::Service(ServiceArgs {
+                command: ServiceCommand::Stop,
+            })),
+        })
+        .unwrap();
+
+        assert_eq!(storage::read_state(&paths).unwrap(), state);
+        assert_eq!(
+            app.runner.commands.borrow()[0],
+            vec!["launchctl", "remove", crate::launch_agent::LABEL]
+        );
     }
 
     #[test]

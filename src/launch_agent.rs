@@ -46,6 +46,7 @@ pub fn install<R: CommandRunner>(
 
 pub fn remove<R: CommandRunner>(paths: &WallctlPaths, runner: &R) -> Result<()> {
     unload_existing(paths, runner)?;
+    runner.run_allow_failure("launchctl", &["remove", LABEL])?;
     if paths.launch_agent_plist.exists() {
         fs::remove_file(&paths.launch_agent_plist)
             .with_context(|| format!("failed to remove {}", paths.launch_agent_plist.display()))?;

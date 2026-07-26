@@ -33,6 +33,8 @@ pub enum Command {
     Logs,
     /// Remove a collection. Active collections cannot be removed.
     Remove(CollectionArg),
+    /// Rename a collection without changing its stable identifier.
+    Rename(RenameArgs),
     /// Create a new collection.
     New(NewArgs),
     /// Capture the current macOS wallpaper profile into a collection.
@@ -65,6 +67,8 @@ pub enum ApiCommand {
     Capture(CaptureArgs),
     /// Remove a collection.
     Remove(CollectionArg),
+    /// Rename a collection without changing its stable identifier.
+    Rename(RenameArgs),
     /// Create a new collection.
     New(NewArgs),
     /// Create dynamic HEIC wallpaper assets.
@@ -143,6 +147,12 @@ pub struct ApiLivePreferencesArgs {
 #[derive(Debug, Args)]
 pub struct CollectionArg {
     pub collection: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RenameArgs {
+    pub collection: String,
+    pub title: String,
 }
 
 #[derive(Debug, Args)]

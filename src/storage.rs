@@ -57,6 +57,23 @@ pub fn update_collection(paths: &WallctlPaths, config: &CollectionConfig) -> Res
     atomic_write_string(&paths.collection_config(&config.name), &toml)
 }
 
+pub fn rename_collection(
+    paths: &WallctlPaths,
+    name: &str,
+    title: &str,
+) -> Result<CollectionConfig> {
+    let title = title.trim();
+    if title.is_empty() {
+        bail!("collection title cannot be empty");
+    }
+
+    let mut config = read_collection(paths, name)?;
+    config.title = title.to_string();
+    config.validate_metadata()?;
+    update_collection(paths, &config)?;
+    Ok(config)
+}
+
 pub fn list_collections(paths: &WallctlPaths) -> Result<Vec<CollectionConfig>> {
     if !paths.collections.exists() {
         return Ok(Vec::new());
@@ -140,7 +157,7 @@ mod tests {
     use crate::config::{title_from_input, CollectionConfig};
     use crate::paths::WallctlPaths;
 
-    use super::{list_collections, read_state, write_collection, write_state};
+    use super::{list_collections, read_state, rename_collection, write_collection, write_state};
 
     #[test]
     fn writes_and_reads_collection_config() {
@@ -164,5 +181,22 @@ mod tests {
 
         write_state(&paths, &state).unwrap();
         assert_eq!(read_state(&paths).unwrap(), state);
+    }
+
+    #[test]
+    fn renames_collection_title_without_changing_identifier() {
+        let tmp = TempDir::new().unwrap();
+        let paths = WallctlPaths::from_home(tmp.path());
+        let config = CollectionConfig::new_static("focus".to_string(), "Focus".to_string());
+        write_collection(&paths, &config).unwrap();
+
+        let renamed = rename_collection(&paths, "focus", "Deep Focus").unwrap();
+
+        assert_eq!(renamed.name, "focus");
+        assert_eq!(renamed.title, "Deep Focus");
+        assert_eq!(
+            list_collections(&paths).unwrap()[0].title,
+            "Deep Focus".to_string()
+        );
     }
 }

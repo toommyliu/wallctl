@@ -69,6 +69,19 @@ pub fn validate_profile(value: &Value) -> Result<ProfileInfo> {
     Ok(info)
 }
 
+pub fn preview_image_path(value: &Value) -> Option<PathBuf> {
+    let mut references = Vec::new();
+    collect_local_file_references(value, &mut references);
+    references.sort();
+    references.dedup();
+
+    references
+        .iter()
+        .find(|path| is_wallpaper_asset_path(path) && path.is_file())
+        .cloned()
+        .or_else(|| references.iter().find_map(|path| madesktop_thumbnail(path)))
+}
+
 pub fn resolved_apply_mode(requested: ApplyMode, info: &ProfileInfo) -> ApplyMode {
     match requested {
         ApplyMode::Smart if info.provider == AERIAL_PROVIDER => ApplyMode::FullProfile,
@@ -181,6 +194,20 @@ where
         Value::Dictionary(values) => {
             for value in values.values_mut() {
                 rewrite_file_references_inner(value, rewrite, rewrites)?;
+            }
+        }
+        Value::Data(bytes) => {
+            let Ok(mut embedded) = Value::from_reader(Cursor::new(bytes.as_slice())) else {
+                return Ok(());
+            };
+            let rewrite_count = rewrites.len();
+            rewrite_file_references_inner(&mut embedded, rewrite, rewrites)?;
+            if rewrites.len() != rewrite_count {
+                let mut rewritten = Vec::new();
+                embedded
+                    .to_writer_binary(&mut rewritten)
+                    .context("failed to rewrite embedded wallpaper configuration")?;
+                *bytes = rewritten;
             }
         }
         _ => {}
@@ -314,7 +341,7 @@ fn asset_id_from_plist_bytes(bytes: &[u8]) -> Option<String> {
         .and_then(|value| find_string_key(&value, "assetID"))
 }
 
-fn aerial_configuration_data(asset_id: &str) -> Result<Vec<u8>> {
+pub(crate) fn aerial_configuration_data(asset_id: &str) -> Result<Vec<u8>> {
     let mut dict = Dictionary::new();
     dict.insert("assetID".to_string(), Value::String(asset_id.to_string()));
     let mut bytes = Vec::new();
@@ -375,6 +402,37 @@ fn collect_file_references(value: &Value, output: &mut Vec<PathBuf>) {
                 collect_file_references(child, output);
             }
         }
+        Value::Data(bytes) => {
+            if let Ok(embedded) = Value::from_reader(Cursor::new(bytes)) {
+                collect_file_references(&embedded, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_local_file_references(value: &Value, output: &mut Vec<PathBuf>) {
+    match value {
+        Value::String(raw) => {
+            if let Some(reference) = local_file_reference(raw) {
+                output.push(reference.path);
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                collect_local_file_references(child, output);
+            }
+        }
+        Value::Dictionary(dict) => {
+            for child in dict.values() {
+                collect_local_file_references(child, output);
+            }
+        }
+        Value::Data(bytes) => {
+            if let Ok(embedded) = Value::from_reader(Cursor::new(bytes)) {
+                collect_local_file_references(&embedded, output);
+            }
+        }
         _ => {}
     }
 }
@@ -386,6 +444,14 @@ struct AssetReference {
 }
 
 fn local_asset_reference(raw: &str) -> Option<AssetReference> {
+    let reference = local_file_reference(raw)?;
+    if !is_wallpaper_asset_path(&reference.path) {
+        return None;
+    }
+    Some(reference)
+}
+
+fn local_file_reference(raw: &str) -> Option<AssetReference> {
     let trimmed = raw.trim();
     let (path, was_file_url) = if let Some(rest) = trimmed.strip_prefix("file://") {
         (PathBuf::from(percent_decode_file_url(rest)), true)
@@ -395,11 +461,22 @@ fn local_asset_reference(raw: &str) -> Option<AssetReference> {
         return None;
     };
 
-    if !is_wallpaper_asset_path(&path) {
+    Some(AssetReference { path, was_file_url })
+}
+
+fn madesktop_thumbnail(path: &Path) -> Option<PathBuf> {
+    if path.extension().and_then(|extension| extension.to_str()) != Some("madesktop")
+        || !path.is_file()
+    {
         return None;
     }
 
-    Some(AssetReference { path, was_file_url })
+    let descriptor = Value::from_file(path).ok()?;
+    let raw = find_string_key(&descriptor, "thumbnailPath")?;
+    let thumbnail = local_file_reference(&raw)
+        .map(|reference| reference.path)
+        .unwrap_or_else(|| path.parent().unwrap_or(Path::new("")).join(raw));
+    (is_wallpaper_asset_path(&thumbnail) && thumbnail.is_file()).then_some(thumbnail)
 }
 
 fn is_wallpaper_asset_path(path: &Path) -> bool {
@@ -531,6 +608,7 @@ fn strip_volatile_wallpaper_fields(value: &mut Value) {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
 
     use plist::{Dictionary, Value};
     use tempfile::TempDir;
@@ -571,12 +649,75 @@ mod tests {
         Value::Dictionary(root)
     }
 
+    fn embedded_image_profile(path: &Path) -> Value {
+        let mut url = Dictionary::new();
+        url.insert(
+            "relative".to_string(),
+            Value::String(format!("file://{}", path.display())),
+        );
+        let mut configuration = Dictionary::new();
+        configuration.insert("url".to_string(), Value::Dictionary(url));
+        let mut configuration_data = Vec::new();
+        Value::Dictionary(configuration)
+            .to_writer_binary(&mut configuration_data)
+            .unwrap();
+
+        let mut choice = Dictionary::new();
+        choice.insert(
+            "Provider".to_string(),
+            Value::String("com.apple.wallpaper.choice.image".to_string()),
+        );
+        choice.insert("Configuration".to_string(), Value::Data(configuration_data));
+        let mut content = Dictionary::new();
+        content.insert(
+            "Choices".to_string(),
+            Value::Array(vec![Value::Dictionary(choice)]),
+        );
+        let mut linked = Dictionary::new();
+        linked.insert("Content".to_string(), Value::Dictionary(content));
+        let mut all = Dictionary::new();
+        all.insert("Linked".to_string(), Value::Dictionary(linked));
+        let mut root = Dictionary::new();
+        root.insert("AllSpacesAndDisplays".to_string(), Value::Dictionary(all));
+        Value::Dictionary(root)
+    }
+
     #[test]
     fn finds_provider_in_linked_profile() {
         assert_eq!(
             wallpaper_provider(&sample_profile("com.apple.wallpaper.choice.image")).unwrap(),
             "com.apple.wallpaper.choice.image"
         );
+    }
+
+    #[test]
+    fn finds_image_reference_in_embedded_configuration() {
+        let tmp = TempDir::new().unwrap();
+        let image = tmp.path().join("wallpaper.heic");
+        fs::write(&image, b"image").unwrap();
+
+        let info = super::analyze_profile(&embedded_image_profile(&image)).unwrap();
+
+        assert_eq!(info.file_references, vec![image]);
+    }
+
+    #[test]
+    fn rewrites_image_reference_in_embedded_configuration() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("wallpaper.heic");
+        let managed = tmp.path().join("managed.heic");
+        fs::write(&source, b"image").unwrap();
+        let mut profile = embedded_image_profile(&source);
+
+        let rewrites = super::rewrite_file_references(&mut profile, |path| {
+            assert_eq!(path, source);
+            Ok(managed.clone())
+        })
+        .unwrap();
+        let info = super::analyze_profile(&profile).unwrap();
+
+        assert_eq!(rewrites, vec![(source, managed.clone())]);
+        assert_eq!(info.file_references, vec![managed]);
     }
 
     #[test]

@@ -6,6 +6,7 @@ pub struct WallctlPaths {
     pub app_support: PathBuf,
     pub collections: PathBuf,
     pub state_file: PathBuf,
+    pub live_config_file: PathBuf,
     pub app_logs: PathBuf,
     pub wallctl_log: PathBuf,
     pub launch_agents: PathBuf,
@@ -16,6 +17,9 @@ pub struct WallctlPaths {
     pub wallpaper_index: PathBuf,
     pub aerial_cache: PathBuf,
     pub aerial_manifest_entries: PathBuf,
+    pub wallpaper_extensions: PathBuf,
+    pub system_wallpapers: PathBuf,
+    pub app_containers: PathBuf,
 }
 
 impl WallctlPaths {
@@ -24,6 +28,7 @@ impl WallctlPaths {
         let app_support = home.join("Library/Application Support/wallctl");
         let collections = app_support.join("collections");
         let state_file = app_support.join("state.toml");
+        let live_config_file = app_support.join("live.toml");
         let app_logs = app_support.join("logs");
         let wallctl_log = app_logs.join("wallctl.log");
         let launch_agents = home.join("Library/LaunchAgents");
@@ -37,12 +42,16 @@ impl WallctlPaths {
             home.join("Library/Application Support/com.apple.wallpaper/aerials/videos");
         let aerial_manifest_entries = home
             .join("Library/Application Support/com.apple.wallpaper/aerials/manifest/entries.json");
+        let wallpaper_extensions = PathBuf::from("/System/Library/ExtensionKit/Extensions");
+        let system_wallpapers = PathBuf::from("/System/Library/Desktop Pictures/.wallpapers");
+        let app_containers = home.join("Library/Containers");
 
         Self {
             home,
             app_support,
             collections,
             state_file,
+            live_config_file,
             app_logs,
             wallctl_log,
             launch_agents,
@@ -53,6 +62,9 @@ impl WallctlPaths {
             wallpaper_index,
             aerial_cache,
             aerial_manifest_entries,
+            wallpaper_extensions,
+            system_wallpapers,
+            app_containers,
         }
     }
 

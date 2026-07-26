@@ -1,3 +1,4 @@
+pub mod api;
 pub mod app;
 pub mod assets;
 pub mod cli;
@@ -5,7 +6,9 @@ pub mod clock;
 pub mod config;
 pub mod heic;
 pub mod launch_agent;
+pub mod live;
 pub mod paths;
+pub mod preview;
 pub mod profile;
 pub mod runner;
 pub mod schedule;

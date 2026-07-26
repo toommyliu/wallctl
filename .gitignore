@@ -1,2 +1,8 @@
 /target/
 .DS_Store
+.repos/
+.build/
+/dist/
+xcuserdata/
+*.xcuserstate
+*.profraw

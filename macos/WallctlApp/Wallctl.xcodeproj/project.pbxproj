@@ -1,0 +1,497 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 70;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		A10000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A70000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A40000000000000000000001;
+			remoteInfo = WallctlApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A10000000000000000000030 /* Exceptions for "Sources/WallctlApp" in "WallctlLiveApp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ContentView.swift,
+				VideoPosterCache.swift,
+			);
+			target = A40000000000000000000003 /* WallctlLiveApp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000010 /* Wallctl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Wallctl.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000011 /* WallctlAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WallctlAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000013 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		A10000000000000000000014 /* Wallctl Live.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Wallctl Live.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000015 /* Info-Live.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info-Live.plist"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000020 /* Sources/WallctlApp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10000000000000000000030 /* Exceptions for "Sources/WallctlApp" in "WallctlLiveApp" target */,
+			);
+			explicitFileTypes = {};
+			explicitFolders = ();
+			path = Sources/WallctlApp;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000021 /* Tests/WallctlAppTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Tests/WallctlAppTests; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A20000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A20000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A20000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A30000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000020 /* Sources/WallctlApp */,
+				A10000000000000000000021 /* Tests/WallctlAppTests */,
+				A10000000000000000000012 /* Info.plist */,
+				A10000000000000000000015 /* Info-Live.plist */,
+				A10000000000000000000013 /* Package.swift */,
+				A30000000000000000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A30000000000000000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000010 /* Wallctl.app */,
+				A10000000000000000000014 /* Wallctl Live.app */,
+				A10000000000000000000011 /* WallctlAppTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A40000000000000000000001 /* WallctlApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A60000000000000000000001 /* Build configuration list for PBXNativeTarget "WallctlApp" */;
+			buildPhases = (
+				A50000000000000000000001 /* Sources */,
+				A20000000000000000000001 /* Frameworks */,
+				A50000000000000000000002 /* Resources */,
+				A50000000000000000000003 /* Build and Embed wallctl */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000020 /* Sources/WallctlApp */,
+			);
+			name = WallctlApp;
+			productName = Wallctl;
+			productReference = A10000000000000000000010 /* Wallctl.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A40000000000000000000002 /* WallctlAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A60000000000000000000002 /* Build configuration list for PBXNativeTarget "WallctlAppTests" */;
+			buildPhases = (
+				A50000000000000000000004 /* Sources */,
+				A20000000000000000000002 /* Frameworks */,
+				A50000000000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A10000000000000000000002 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000021 /* Tests/WallctlAppTests */,
+			);
+			name = WallctlAppTests;
+			productName = WallctlAppTests;
+			productReference = A10000000000000000000011 /* WallctlAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A40000000000000000000003 /* WallctlLiveApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A60000000000000000000004 /* Build configuration list for PBXNativeTarget "WallctlLiveApp" */;
+			buildPhases = (
+				A50000000000000000000006 /* Sources */,
+				A20000000000000000000003 /* Frameworks */,
+				A50000000000000000000007 /* Resources */,
+				A50000000000000000000008 /* Build and Embed wallctl */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000020 /* Sources/WallctlApp */,
+			);
+			name = WallctlLiveApp;
+			productName = "Wallctl Live";
+			productReference = A10000000000000000000014 /* Wallctl Live.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A70000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					A40000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					A40000000000000000000002 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = A40000000000000000000001;
+					};
+					A40000000000000000000003 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = A60000000000000000000003 /* Build configuration list for PBXProject "Wallctl" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A30000000000000000000001;
+			productRefGroup = A30000000000000000000002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A40000000000000000000001 /* WallctlApp */,
+				A40000000000000000000003 /* WallctlLiveApp */,
+				A40000000000000000000002 /* WallctlAppTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A50000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A50000000000000000000003 /* Build and Embed wallctl */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build and Embed wallctl";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/wallctl",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nROOT=\"$SRCROOT/../..\"\nPATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nexport PATH\nif ! command -v cargo >/dev/null 2>&1; then\n  echo \"error: Cargo was not found. Install Rust from https://rustup.rs and restart Xcode.\" >&2\n  exit 1\nfi\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  cargo build --manifest-path \"$ROOT/Cargo.toml\" --release\n  SOURCE=\"$ROOT/target/release/wallctl\"\nelse\n  cargo build --manifest-path \"$ROOT/Cargo.toml\"\n  SOURCE=\"$ROOT/target/debug/wallctl\"\nfi\nDESTINATION=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/wallctl\"\nmkdir -p \"$(dirname \"$DESTINATION\")\"\ncp \"$SOURCE\" \"$DESTINATION\"\n";
+		};
+		A50000000000000000000008 /* Build and Embed wallctl */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build and Embed wallctl";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/wallctl",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nROOT=\"$SRCROOT/../..\"\nPATH=\"$HOME/.cargo/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nexport PATH\nif ! command -v cargo >/dev/null 2>&1; then\n  echo \"error: Cargo was not found. Install Rust from https://rustup.rs and restart Xcode.\" >&2\n  exit 1\nfi\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  cargo build --manifest-path \"$ROOT/Cargo.toml\" --release\n  SOURCE=\"$ROOT/target/release/wallctl\"\nelse\n  cargo build --manifest-path \"$ROOT/Cargo.toml\"\n  SOURCE=\"$ROOT/target/debug/wallctl\"\nfi\nDESTINATION=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/wallctl\"\nmkdir -p \"$(dirname \"$DESTINATION\")\"\ncp \"$SOURCE\" \"$DESTINATION\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A50000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A50000000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A10000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A40000000000000000000001 /* WallctlApp */;
+			targetProxy = A10000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A80000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Local Code Signing";
+				CODE_SIGN_STYLE = Manual;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.wallctl.app;
+				PRODUCT_MODULE_NAME = WallctlApp;
+				PRODUCT_NAME = Wallctl;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Local Code Signing";
+				CODE_SIGN_STYLE = Manual;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.wallctl.app;
+				PRODUCT_MODULE_NAME = WallctlApp;
+				PRODUCT_NAME = Wallctl;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A80000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.wallctl.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Wallctl.app/Contents/MacOS/Wallctl";
+			};
+			name = Debug;
+		};
+		A80000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.wallctl.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Wallctl.app/Contents/MacOS/Wallctl";
+			};
+			name = Release;
+		};
+		A80000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A80000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Local Code Signing";
+				CODE_SIGN_STYLE = Manual;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Info-Live.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.wallctl.live;
+				PRODUCT_MODULE_NAME = WallctlLiveApp;
+				PRODUCT_NAME = "Wallctl Live";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) WALLCTL_LIVE";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "Local Code Signing";
+				CODE_SIGN_STYLE = Manual;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Info-Live.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = local.wallctl.live;
+				PRODUCT_MODULE_NAME = WallctlLiveApp;
+				PRODUCT_NAME = "Wallctl Live";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) WALLCTL_LIVE";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A60000000000000000000001 /* Build configuration list for PBXNativeTarget "WallctlApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000001 /* Debug */,
+				A80000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A60000000000000000000002 /* Build configuration list for PBXNativeTarget "WallctlAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000003 /* Debug */,
+				A80000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A60000000000000000000003 /* Build configuration list for PBXProject "Wallctl" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000005 /* Debug */,
+				A80000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A60000000000000000000004 /* Build configuration list for PBXNativeTarget "WallctlLiveApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000007 /* Debug */,
+				A80000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A70000000000000000000001 /* Project object */;
+}

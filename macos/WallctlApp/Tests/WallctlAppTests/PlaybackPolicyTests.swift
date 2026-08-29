@@ -3,6 +3,21 @@ import XCTest
 @testable import WallctlApp
 
 final class PlaybackPolicyTests: XCTestCase {
+    @MainActor
+    func testPowerStateNotificationCanArriveOffMainThread() async {
+        let controller = LiveWallpaperController()
+
+        await Task.detached {
+            NotificationCenter.default.post(
+                name: .NSProcessInfoPowerStateDidChange,
+                object: nil
+            )
+        }.value
+        await Task.yield()
+
+        withExtendedLifetime(controller) {}
+    }
+
     func testLiveWallpaperMenuToggleReenablesAfterTurningPlaybackOff() {
         let enabled = LiveConfig(
             enabled: true,

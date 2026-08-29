@@ -145,8 +145,11 @@ final class LiveWallpaperController: ObservableObject {
         updatePlayback()
     }
 
-    @objc private func powerModeChanged() {
-        updatePowerState()
+    // Foundation delivers this notification on an arbitrary queue.
+    @objc nonisolated private func powerModeChanged() {
+        Task { @MainActor [weak self] in
+            self?.updatePowerState()
+        }
     }
 
     @objc private func displaysChanged() {

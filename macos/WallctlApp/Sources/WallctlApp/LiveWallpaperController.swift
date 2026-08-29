@@ -266,8 +266,12 @@ final class LiveWallpaperController: ObservableObject {
             idleUnloadTask?.cancel()
             idleUnloadTask = nil
             surfaces.values.forEach { $0.play() }
+        } else if constraints.shouldKeepWallpaperVisible {
+            idleUnloadTask?.cancel()
+            idleUnloadTask = nil
+            surfaces.values.forEach { $0.pause(keepingWindowVisible: true) }
         } else {
-            surfaces.values.forEach { $0.pause() }
+            surfaces.values.forEach { $0.pause(keepingWindowVisible: false) }
             scheduleIdleUnload()
         }
     }
@@ -302,6 +306,7 @@ private final class DesktopVideoSurface {
     private var activeReadyObserver: NSKeyValueObservation?
     private var transitionReadyObserver: NSKeyValueObservation?
     private var playbackRequested = false
+    private var windowRequestedVisible = false
     private var currentURL: URL?
     private var transitionGeneration = 0
     private var crossfadeInProgressGeneration: Int?
@@ -377,6 +382,7 @@ private final class DesktopVideoSurface {
     }
 
     func play() {
+        windowRequestedVisible = true
         playbackRequested = true
         if active == nil, let currentURL {
             installInitialVideo(currentURL)
@@ -387,33 +393,31 @@ private final class DesktopVideoSurface {
         if let incoming, incoming.layer.isReadyForDisplay {
             beginCrossfade(to: incoming, generation: transitionGeneration)
         }
-        guard let active else { return }
-        if active.layer.isReadyForDisplay {
-            window.orderFrontRegardless()
-        } else if activeReadyObserver == nil {
-            activeReadyObserver = active.layer.observe(\.isReadyForDisplay, options: [.new]) {
-                [weak self] layer, _ in
-                guard layer.isReadyForDisplay else { return }
-                Task { @MainActor in
-                    guard let self, self.playbackRequested else { return }
-                    self.window.orderFrontRegardless()
-                    self.activeReadyObserver?.invalidate()
-                    self.activeReadyObserver = nil
-                }
-            }
-        }
+        revealActiveWhenReady()
     }
 
-    func pause() {
+    func pause(keepingWindowVisible: Bool) {
+        windowRequestedVisible = keepingWindowVisible
         playbackRequested = false
         active?.pause()
         incoming?.pause()
-        activeReadyObserver?.invalidate()
-        activeReadyObserver = nil
-        window.orderOut(nil)
+        if keepingWindowVisible {
+            if active == nil, let currentURL {
+                installInitialVideo(currentURL)
+            }
+            if active?.layer.isReadyForDisplay != true {
+                active?.play()
+            }
+            revealActiveWhenReady()
+        } else {
+            activeReadyObserver?.invalidate()
+            activeReadyObserver = nil
+            window.orderOut(nil)
+        }
     }
 
     func stop() {
+        windowRequestedVisible = false
         playbackRequested = false
         currentURL = nil
         releasePlayerSlots()
@@ -478,7 +482,7 @@ private final class DesktopVideoSurface {
         transitionReadyObserver?.invalidate()
         transitionReadyObserver = nil
         crossfadeInProgressGeneration = generation
-        window.orderFrontRegardless()
+        revealWindowIfNeeded()
         CATransaction.begin()
         CATransaction.setAnimationDuration(transitionDuration)
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
@@ -506,11 +510,46 @@ private final class DesktopVideoSurface {
         observeApproachingEnd(of: replacement)
         if playbackRequested {
             replacement.play()
-            window.orderFrontRegardless()
+            revealWindowIfNeeded()
         } else {
             replacement.pause()
-            window.orderOut(nil)
+            if windowRequestedVisible {
+                revealWindowIfNeeded()
+            } else {
+                window.orderOut(nil)
+            }
         }
+    }
+
+    private func revealActiveWhenReady() {
+        guard let active else { return }
+        if active.layer.isReadyForDisplay {
+            if !playbackRequested {
+                active.pause()
+            }
+            revealWindowIfNeeded()
+        } else if activeReadyObserver == nil {
+            activeReadyObserver = active.layer.observe(\.isReadyForDisplay, options: [.new]) {
+                [weak self] layer, _ in
+                guard layer.isReadyForDisplay else { return }
+                Task { @MainActor in
+                    guard let self, self.windowRequestedVisible else { return }
+                    if !self.playbackRequested {
+                        self.active?.pause()
+                        self.incoming?.pause()
+                    }
+                    self.revealWindowIfNeeded()
+                    self.activeReadyObserver?.invalidate()
+                    self.activeReadyObserver = nil
+                }
+            }
+        }
+    }
+
+    private func revealWindowIfNeeded() {
+        // Reordering a visible all-Spaces window can interrupt an in-flight Space change.
+        guard !window.isVisible else { return }
+        window.orderFront(nil)
     }
 }
 

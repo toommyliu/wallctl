@@ -54,11 +54,14 @@ struct PlaybackConstraints: Equatable {
     var desktopOccluded = false
 
     var shouldPlay: Bool {
+        shouldKeepWallpaperVisible && !desktopOccluded
+    }
+
+    var shouldKeepWallpaperVisible: Bool {
         enabled
             && !screenUnavailable
             && !lowPowerMode
             && !(pauseOnBattery && onBattery)
-            && !desktopOccluded
     }
 
     var pauseReason: String? {

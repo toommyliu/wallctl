@@ -66,6 +66,17 @@ final class PlaybackPolicyTests: XCTestCase {
         XCTAssertEqual(constraints.pauseReason, "Low Power Mode is on")
     }
 
+    func testDesktopOcclusionPausesWithoutHidingWallpaper() {
+        var constraints = PlaybackConstraints()
+        constraints.desktopOccluded = true
+
+        XCTAssertFalse(constraints.shouldPlay)
+        XCTAssertTrue(constraints.shouldKeepWallpaperVisible)
+
+        constraints.lowPowerMode = true
+        XCTAssertFalse(constraints.shouldKeepWallpaperVisible)
+    }
+
     func testBatteryConstraintIsOptional() {
         var constraints = PlaybackConstraints()
         constraints.onBattery = true

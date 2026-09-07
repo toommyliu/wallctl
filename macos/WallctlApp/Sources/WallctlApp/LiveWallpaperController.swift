@@ -298,7 +298,7 @@ private extension NSScreen {
 }
 
 @MainActor
-private final class DesktopVideoSurface {
+final class DesktopVideoSurface {
     let window: NSWindow
     private let content: NSView
     private var active: PlayerSlot?
@@ -342,7 +342,7 @@ private final class DesktopVideoSurface {
 
     func setVideo(_ url: URL) {
         currentURL = url
-        guard playbackRequested else {
+        guard windowRequestedVisible else {
             releasePlayerSlots()
             return
         }
@@ -367,7 +367,7 @@ private final class DesktopVideoSurface {
         slot.layer.opacity = 0
         content.layer?.addSublayer(slot.layer)
         incoming = slot
-        if playbackRequested { slot.play() }
+        slot.play()
 
         transitionReadyObserver = slot.layer.observe(\.isReadyForDisplay, options: [.new]) {
             [weak self, weak slot] layer, _ in
@@ -407,6 +407,14 @@ private final class DesktopVideoSurface {
             }
             if active?.layer.isReadyForDisplay != true {
                 active?.play()
+            }
+            if let incoming {
+                if incoming.layer.isReadyForDisplay {
+                    beginCrossfade(to: incoming, generation: transitionGeneration)
+                } else {
+                    // Preparing one frame must continue even when occlusion pauses playback.
+                    incoming.play()
+                }
             }
             revealActiveWhenReady()
         } else {
@@ -472,7 +480,7 @@ private final class DesktopVideoSurface {
     }
 
     private func beginCrossfade(to slot: PlayerSlot, generation: Int) {
-        guard playbackRequested,
+        guard windowRequestedVisible,
               generation == transitionGeneration,
               crossfadeInProgressGeneration != generation,
               incoming === slot,
@@ -482,6 +490,7 @@ private final class DesktopVideoSurface {
         transitionReadyObserver?.invalidate()
         transitionReadyObserver = nil
         crossfadeInProgressGeneration = generation
+        if !playbackRequested { slot.pause() }
         revealWindowIfNeeded()
         CATransaction.begin()
         CATransaction.setAnimationDuration(transitionDuration)
@@ -491,7 +500,8 @@ private final class DesktopVideoSurface {
                 self?.finishCrossfade(generation: generation)
             }
         }
-        active.layer.opacity = 0
+        // Keep an opaque frame underneath the fade so black never enters the blend.
+        active.layer.opacity = 1
         slot.layer.opacity = 1
         CATransaction.commit()
     }
@@ -536,7 +546,9 @@ private final class DesktopVideoSurface {
                     guard let self, self.windowRequestedVisible else { return }
                     if !self.playbackRequested {
                         self.active?.pause()
-                        self.incoming?.pause()
+                        if self.incoming?.layer.isReadyForDisplay == true {
+                            self.incoming?.pause()
+                        }
                     }
                     self.revealWindowIfNeeded()
                     self.activeReadyObserver?.invalidate()

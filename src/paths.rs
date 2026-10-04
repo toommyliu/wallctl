@@ -93,6 +93,12 @@ impl WallctlPaths {
         self.assets_dir(collection).join("aerials")
     }
 
+    pub fn extension_assets_dir(&self, collection: &str, provider: &str) -> PathBuf {
+        self.assets_dir(collection)
+            .join("extensions")
+            .join(provider)
+    }
+
     pub fn managed_asset_path(&self, collection: &str, filename: &str) -> PathBuf {
         self.assets_dir(collection).join(filename)
     }

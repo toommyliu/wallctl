@@ -179,7 +179,7 @@ fn load_profile_preview(
         .as_deref()
         .and_then(|asset_id| manifest.get(asset_id));
     let extension_asset = if manifest_asset.is_none() {
-        extension_wallpaper_asset(paths, &info.provider)
+        extension_wallpaper_asset(paths, collection, &info.provider)
     } else {
         None
     };
@@ -264,6 +264,7 @@ struct ExtensionWallpaperAsset {
 
 fn extension_wallpaper_asset(
     paths: &WallctlPaths,
+    collection: &str,
     provider: &str,
 ) -> Option<ExtensionWallpaperAsset> {
     let provider_name = provider.rsplit('.').next()?;
@@ -304,12 +305,12 @@ fn extension_wallpaper_asset(
             find_named_file(&resources, &filenames, 2)
                 .or_else(|| find_named_file(&paths.system_wallpapers, &filenames, 3))
         });
-    let container_videos = extension_container_videos(paths, provider, &display_name);
-    let light_video_path = container_videos
+    let videos = extension_videos(paths, collection, provider, &display_name);
+    let light_video_path = videos
         .as_ref()
         .and_then(|videos| videos.light.clone())
         .or(manifest_video);
-    let dark_video_path = container_videos.and_then(|videos| videos.dark);
+    let dark_video_path = videos.and_then(|videos| videos.dark);
 
     Some(ExtensionWallpaperAsset {
         display_name,
@@ -327,15 +328,70 @@ struct ExtensionVideos {
     dark: Option<PathBuf>,
 }
 
-fn extension_container_videos(
+// Reading another app's container makes macOS prompt for access, so the container
+// is read only until a copy exists in wallctl's assets.
+fn extension_videos(
     paths: &WallctlPaths,
+    collection: &str,
     provider: &str,
     identifier: &str,
 ) -> Option<ExtensionVideos> {
-    let videos_dir = paths
+    let backup_dir = paths.extension_assets_dir(collection, provider);
+    if let Some(videos) = matching_extension_videos(&backup_dir, identifier) {
+        return Some(videos);
+    }
+    let container_dir = paths
         .app_containers
         .join(provider)
         .join("Data/Library/Application Support/Videos");
+    let videos = matching_extension_videos(&container_dir, identifier)?;
+    Some(back_up_extension_videos(&backup_dir, &videos).unwrap_or(videos))
+}
+
+fn back_up_extension_videos(dir: &Path, videos: &ExtensionVideos) -> Result<ExtensionVideos> {
+    let parent = dir
+        .parent()
+        .with_context(|| format!("backup directory has no parent: {}", dir.display()))?;
+    let staging = parent.join(format!(
+        ".{}.{}.tmp",
+        dir.file_name().unwrap_or_default().to_string_lossy(),
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging)
+        .with_context(|| format!("failed to create {}", staging.display()))?;
+    let copy = |source: &Option<PathBuf>| -> Result<Option<PathBuf>> {
+        let Some(source) = source else {
+            return Ok(None);
+        };
+        let filename = source
+            .file_name()
+            .with_context(|| format!("video path has no filename: {}", source.display()))?;
+        fs::copy(source, staging.join(filename)).with_context(|| {
+            format!(
+                "failed to copy {} to {}",
+                source.display(),
+                staging.display()
+            )
+        })?;
+        Ok(Some(dir.join(filename)))
+    };
+    let result = (|| -> Result<ExtensionVideos> {
+        let backup = ExtensionVideos {
+            light: copy(&videos.light)?,
+            dark: copy(&videos.dark)?,
+        };
+        fs::rename(&staging, dir)
+            .with_context(|| format!("failed to move videos to {}", dir.display()))?;
+        Ok(backup)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result
+}
+
+fn matching_extension_videos(videos_dir: &Path, identifier: &str) -> Option<ExtensionVideos> {
     let identifier_tokens = normalized_tokens(identifier);
     let mut videos = ExtensionVideos::default();
 
@@ -668,6 +724,10 @@ mod tests {
         )
         .unwrap();
 
+        let backup = paths.extension_assets_dir("tahoe", "com.apple.NeptuneOneExtension");
+        let light_backup = backup.join("Tahoe Light Landscape.mov");
+        let dark_backup = backup.join("Tahoe Dark Landscape.mov");
+
         let catalog = load_catalog(&paths).unwrap();
         let preview = &catalog.collections[0].profiles[0];
         assert_eq!(preview.display_name.as_deref(), Some("Tahoe"));
@@ -683,17 +743,32 @@ mod tests {
             preview.dark_image_path.as_deref(),
             Some(resources.join("TahoeDark.heic").as_path())
         );
-        assert_eq!(preview.video_path.as_deref(), Some(light_video.as_path()));
+        assert_eq!(preview.video_path.as_deref(), Some(light_backup.as_path()));
         assert_eq!(
             preview.light_video_path.as_deref(),
-            Some(light_video.as_path())
+            Some(light_backup.as_path())
         );
         assert_eq!(
             preview.dark_video_path.as_deref(),
-            Some(dark_video.as_path())
+            Some(dark_backup.as_path())
         );
+        assert_eq!(fs::read(&light_backup).unwrap(), b"light video");
+        assert_eq!(fs::read(&dark_backup).unwrap(), b"dark video");
         assert!(preview.live_capable);
         assert!(preview.automatic_live_asset);
+
+        fs::remove_dir_all(&paths.app_containers).unwrap();
+        let catalog = load_catalog(&paths).unwrap();
+        let preview = &catalog.collections[0].profiles[0];
+        assert_eq!(
+            preview.light_video_path.as_deref(),
+            Some(light_backup.as_path())
+        );
+        assert_eq!(
+            preview.dark_video_path.as_deref(),
+            Some(dark_backup.as_path())
+        );
+        assert!(preview.live_capable);
     }
 
     #[test]

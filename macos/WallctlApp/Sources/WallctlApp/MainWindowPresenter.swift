@@ -27,11 +27,11 @@ final class MainWindowPresenter: NSObject, ObservableObject, NSWindowDelegate {
         let autosaveName: String? = nil
 #else
         let host = NSHostingController(rootView: AnyView(ContentView().environmentObject(store)))
-        let defaultSize = NSSize(width: 1_100, height: 720)
+        let defaultSize = NSSize(width: 900, height: 600)
         let styleMask: NSWindow.StyleMask = [
             .titled, .closable, .miniaturizable, .resizable, .fullSizeContentView,
         ]
-        let autosaveName: String? = "wallctl.main-window"
+        let autosaveName: String? = "wallctl.window"
 #endif
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: defaultSize),

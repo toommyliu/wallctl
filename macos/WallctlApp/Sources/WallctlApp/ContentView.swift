@@ -16,7 +16,10 @@ struct ContentView: View {
             List(selection: $store.selection) {
                 Section("Collections") {
                     ForEach(store.catalog.collections) { collection in
-                        CollectionSidebarRow(collection: collection)
+                        CollectionSidebarRow(
+                            collection: collection,
+                            isActive: store.status?.activeCollection == collection.name
+                        )
                             .tag(collection.name)
                             .contextMenu {
                                 Button("Rename…") {
@@ -28,7 +31,7 @@ struct ContentView: View {
             }
             .opacity(store.hasLoadedCatalog ? 1 : 0)
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 310)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 260)
         } detail: {
             Group {
                 if !store.hasLoadedCatalog {
@@ -63,7 +66,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.28), value: store.hasLoadedCatalog)
-        .frame(minWidth: 920, minHeight: 600)
+        .frame(minWidth: 680, minHeight: 440)
         .sheet(isPresented: $showingCreate) { CreateCollectionSheet() }
         .sheet(isPresented: $showingHEIC) { CreateHEICSheet() }
         .sheet(isPresented: $showingSettings) { LiveSettingsView() }
@@ -102,6 +105,7 @@ struct ContentView: View {
 
 private struct CollectionSidebarRow: View {
     let collection: WallpaperCollection
+    let isActive: Bool
 
     private var strategyLabel: String {
         switch collection.strategy {
@@ -121,6 +125,15 @@ private struct CollectionSidebarRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            if isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .help("Active collection")
+                    .accessibilityLabel("Active")
             }
         }
         .padding(.vertical, 3)
@@ -243,47 +256,20 @@ private struct CollectionDetail: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 20) {
                 collectionHeader
 
-                if collection.strategy == "schedule", !collection.slots.isEmpty {
-                    ScheduleOverview(
-                        collection: collection,
-                        currentProfile: currentScheduleProfile
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(collection.profiles.count == 1 ? "Profile" : "Profiles")
-                            .font(.title3.weight(.semibold))
-                        Text("\(collection.profiles.count)")
-                            .font(.title3.weight(.regular))
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    if collection.profiles.count == 1, let profile = collection.profiles.first {
-                        ProfileCard(
-                            collection: collection,
-                            profile: profile,
-                            isFeatured: true
-                        )
-                        .frame(maxWidth: 980)
-                    } else {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 330), spacing: 18)],
-                            alignment: .leading,
-                            spacing: 18
-                        ) {
-                            ForEach(collection.profiles) { profile in
-                                ProfileCard(collection: collection, profile: profile)
-                            }
-                        }
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 200, maximum: 300), spacing: 16, alignment: .top)],
+                    alignment: .leading,
+                    spacing: 20
+                ) {
+                    ForEach(collection.profiles) { profile in
+                        ProfileCard(collection: collection, profile: profile)
                     }
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 26)
+            .padding(20)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingRename) {
@@ -300,140 +286,63 @@ private struct CollectionDetail: View {
     }
 
     private var collectionHeader: some View {
-        HStack(alignment: .top, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(strategyLabel)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(.quaternary, in: Capsule())
-
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(collection.title)
-                    .font(.system(size: 28, weight: .semibold))
-                    .lineLimit(2)
-
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(1)
                 Text(collectionDescription)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
-            Spacer(minLength: 20)
+            Spacer(minLength: 12)
 
-            HStack(spacing: 10) {
-                if store.status?.activeCollection == collection.name {
-                    StatusBadge("Active", color: .green)
-                } else {
-                    Button("Activate") { store.activate(collection) }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.capsule)
-                        .disabled(!canActivate)
-                        .help(canActivate ? "Make this the active collection" : "Capture or repair every profile before activating")
-                }
-
-                Menu {
-                    Button("Rename Collection…") {
-                        showingRename = true
-                    }
-
-                    Divider()
-
-                    Button("Remove Collection…", role: .destructive) {
-                        showingRemoveConfirmation = true
-                    }
-                } label: {
-                    Label("Collection Actions", systemImage: "ellipsis")
-                        .labelStyle(.iconOnly)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Collection actions")
+            if store.status?.activeCollection == collection.name {
+                StatusBadge("Active", color: .green)
+            } else {
+                Button("Activate") { store.activate(collection) }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .disabled(!canActivate)
+                    .help(canActivate ? "Make this the active collection" : "Capture or repair every profile before activating")
             }
-        }
-    }
 
-    private var currentScheduleProfile: String? {
-        if store.status?.activeCollection == collection.name {
-            return store.status?.expectedProfile
+            Menu {
+                Button("Rename Collection…") {
+                    showingRename = true
+                }
+
+                Divider()
+
+                Button("Remove Collection…", role: .destructive) {
+                    showingRemoveConfirmation = true
+                }
+            } label: {
+                Label("Collection Actions", systemImage: "ellipsis.circle")
+                    .labelStyle(.iconOnly)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Collection actions")
         }
-        return ScheduleTiming.currentProfile(slots: collection.slots)
     }
 
     private var canActivate: Bool {
         !collection.profiles.isEmpty && collection.profiles.allSatisfy(\.valid)
     }
 
-    private var strategyLabel: String {
-        switch collection.strategy {
-        case "schedule": "Schedule"
-        case "dynamic": "Dynamic"
-        default: "Static"
-        }
-    }
-
     private var collectionDescription: String {
         switch collection.strategy {
         case "schedule":
-            "\(collection.profiles.count) wallpaper profiles rotate automatically through the day."
+            "Switches between \(collection.profiles.count) profiles at set times of day."
         case "dynamic":
-            "macOS chooses the matching light or dark appearance from this profile."
+            "Follows the system’s light and dark appearance."
         default:
-            "One captured wallpaper profile is applied across your desktops."
+            "Uses one wallpaper on every desktop."
         }
-    }
-
-}
-
-private struct ScheduleOverview: View {
-    let collection: WallpaperCollection
-    let currentProfile: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Schedule")
-                .font(.headline)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(collection.slots, id: \.profile) { slot in
-                        let profile = collection.profiles.first { $0.name == slot.profile }
-                        ScheduleSlotView(
-                            hour: slot.hour,
-                            title: profile?.displayName ?? slot.profile,
-                            isCurrent: slot.profile == currentProfile
-                        )
-
-                        if slot.profile != collection.slots.last?.profile {
-                            Divider()
-                                .frame(height: 34)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct ScheduleSlotView: View {
-    let hour: Int
-    let title: String
-    let isCurrent: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(formattedHour)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isCurrent ? Color.accentColor : .secondary)
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-        }
-        .foregroundStyle(isCurrent ? Color.primary : .secondary)
-        .frame(minWidth: 110, alignment: .leading)
-    }
-
-    private var formattedHour: String {
-        let date = Calendar.current.date(from: DateComponents(hour: hour)) ?? Date()
-        return date.formatted(date: .omitted, time: .shortened)
     }
 }
 
@@ -462,7 +371,6 @@ private struct ProfileCard: View {
     @State private var showingApplyConfirmation = false
     let collection: WallpaperCollection
     let profile: WallpaperProfile
-    var isFeatured = false
 
     private var hasAppearanceVariants: Bool {
         profile.lightImagePath != nil && profile.darkImagePath != nil
@@ -477,18 +385,66 @@ private struct ProfileCard: View {
     }
 
     var body: some View {
-        Group {
-            if isFeatured {
-                featuredLayout
-            } else {
-                verticalLayout(mediaHeight: 210)
+        VStack(alignment: .leading, spacing: 8) {
+            Color.clear
+                .aspectRatio(16 / 10, contentMode: .fit)
+                .overlay {
+                    ProfileMedia(profile: profile, appearance: previewAppearance)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(.separator.opacity(0.6), lineWidth: 1)
+                }
+                .overlay(alignment: .topLeading) {
+                    if isCurrentScheduleProfile {
+                        Text("Current")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(.green, in: Capsule())
+                            .padding(8)
+                    }
+                }
+
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.displayName ?? profile.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    if let profileSubtitle {
+                        Text(profileSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                profileMenu
+                primaryAction
             }
-        }
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.separator.opacity(0.55), lineWidth: 1)
+
+            if hasAppearanceVariants {
+                Picker("Preview appearance", selection: $previewAppearance) {
+                    ForEach(PreviewAppearance.allCases) { appearance in
+                        Text(appearance.title).tag(appearance)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+            }
+
+            if let issue = profile.issues.first {
+                Label(issue, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .help(profile.issues.joined(separator: "\n"))
+            }
         }
         .alert(applyConfirmationTitle, isPresented: $showingApplyConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -500,177 +456,9 @@ private struct ProfileCard: View {
         }
     }
 
-    private var featuredLayout: some View {
-        ZStack(alignment: .bottom) {
-            profileMedia
-                .frame(height: 420)
-
-            featuredFooter
-                .background(.regularMaterial)
-                .overlay(alignment: .top) {
-                    Divider()
-                }
-        }
-        .frame(height: 420)
-    }
-
-    private func verticalLayout(mediaHeight: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            profileMedia
-                .frame(height: mediaHeight)
-
-            Divider()
-
-            profileDetails
-        }
-    }
-
-    private var profileMedia: some View {
-        ProfileMedia(profile: profile, appearance: previewAppearance)
-            .clipped()
-    }
-
-    private var profileDetails: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            profileIdentity
-            profileBadges
-
-            if hasAppearanceVariants {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Preview")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-
-                    PreviewAppearanceControl(selection: $previewAppearance)
-                }
-            }
-
-            profileIssues
-
-            Spacer(minLength: 0)
-
-            profileActions
-        }
-        .padding(16)
-    }
-
-    private var featuredFooter: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 14) {
-                    profileIdentity
-                    profileBadges
-
-                    if hasAppearanceVariants {
-                        PreviewAppearanceControl(selection: $previewAppearance)
-                    }
-
-                    Spacer(minLength: 12)
-                    profileActions
-                        .fixedSize()
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .top, spacing: 12) {
-                        profileIdentity
-                        Spacer()
-                        profileBadges
-                    }
-
-                    if hasAppearanceVariants {
-                        PreviewAppearanceControl(selection: $previewAppearance)
-                    }
-
-                    profileActions
-                }
-            }
-
-            profileIssues
-        }
-        .padding(16)
-    }
-
-    private var profileIdentity: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(profile.displayName ?? profile.name)
-                .font(.headline)
-                .lineLimit(2)
-            Text(profileSubtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-
     @ViewBuilder
-    private var profileBadges: some View {
-        if isCurrentScheduleProfile || profile.liveCapable || !profile.valid {
-            HStack(spacing: 7) {
-                if isCurrentScheduleProfile {
-                    StatusBadge("Current", color: .green)
-                }
-                if profile.liveCapable {
-                    StatusBadge("Live", color: .blue)
-                }
-                if !profile.valid {
-                    StatusBadge("Needs attention", color: .orange)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var profileIssues: some View {
-        if !profile.issues.isEmpty {
-            Text(profile.issues.joined(separator: "\n"))
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .lineLimit(3)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        }
-    }
-
-    private var profileActions: some View {
-        HStack(spacing: 10) {
-            Button(profile.captured ? "Recapture" : "Capture") {
-                store.capture(collection, profile: profile)
-            }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .help(profile.captured ? "Recapture the wallpaper selected in System Settings" : "Capture the wallpaper selected in System Settings")
-
-            Spacer(minLength: 4)
-
-            Menu {
-                if let profilePath = profile.profilePath {
-                    Button("Reveal Profile in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([
-                            URL(fileURLWithPath: profilePath),
-                        ])
-                    }
-
-                    Divider()
-                }
-
-                Button("Choose Live Video…") { chooseVideo() }
-                if profile.videoPath != nil && !profile.automaticLiveAsset {
-                    Button("Use Automatic Source") { store.clearVideo(collection: collection, profile: profile) }
-                }
-                if let videoPath = profile.videoPath {
-                    Button("Reveal Video") {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: videoPath)])
-                    }
-                }
-            } label: {
-                Label("Profile actions", systemImage: "ellipsis")
-                    .labelStyle(.iconOnly)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("Profile actions")
-
+    private var primaryAction: some View {
+        if profile.captured {
             Button("Apply") {
                 if requiresApplyConfirmation {
                     showingApplyConfirmation = true
@@ -678,20 +466,65 @@ private struct ProfileCard: View {
                     store.apply(collection, profile: profile)
                 }
             }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+            .disabled(!profile.valid)
+        } else {
+            Button("Capture") {
+                store.capture(collection, profile: profile)
+            }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.capsule)
-            .disabled(!profile.valid)
+            .controlSize(.small)
+            .help("Capture the wallpaper selected in System Settings")
         }
-        .controlSize(.regular)
     }
 
-    private var profileSubtitle: String {
-        if collection.strategy == "schedule",
-           let slot = collection.slots.first(where: { $0.profile == profile.name }) {
-            let date = Calendar.current.date(from: DateComponents(hour: slot.hour)) ?? Date()
-            return "Starts at \(date.formatted(date: .omitted, time: .shortened)) · \(profile.name)"
+    private var profileMenu: some View {
+        Menu {
+            if profile.captured {
+                Button("Recapture from System Settings") {
+                    store.capture(collection, profile: profile)
+                }
+
+                Divider()
+            }
+
+            Button("Choose Live Video…") { chooseVideo() }
+            if profile.videoPath != nil && !profile.automaticLiveAsset {
+                Button("Use Automatic Source") { store.clearVideo(collection: collection, profile: profile) }
+            }
+            if let videoPath = profile.videoPath {
+                Button("Reveal Video") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: videoPath)])
+                }
+            }
+
+            if let profilePath = profile.profilePath {
+                Divider()
+
+                Button("Reveal Profile in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([
+                        URL(fileURLWithPath: profilePath),
+                    ])
+                }
+            }
+        } label: {
+            Label("Profile actions", systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly)
         }
-        return profile.name
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Profile actions")
+    }
+
+    private var profileSubtitle: String? {
+        guard collection.strategy == "schedule",
+              let slot = collection.slots.first(where: { $0.profile == profile.name })
+        else { return nil }
+        return "Starts at \(formattedHour(slot.hour))"
     }
 
     private var requiresApplyConfirmation: Bool {
@@ -779,26 +612,6 @@ private enum PreviewAppearance: String, CaseIterable, Identifiable {
     }
 }
 
-private struct PreviewAppearanceControl: View {
-    @Binding var selection: PreviewAppearance
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(PreviewAppearance.allCases) { appearance in
-                CapsuleChoiceButton(
-                    title: appearance.title,
-                    isSelected: selection == appearance
-                ) {
-                    selection = appearance
-                }
-            }
-        }
-        .controlSize(.small)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Preview appearance")
-    }
-}
-
 private struct CapsuleChoiceButton: View {
     let title: String
     let isSelected: Bool
@@ -870,7 +683,7 @@ private struct InlineVideoPreview: View {
                 model.togglePlayback()
             } label: {
                 Image(systemName: model.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 36))
+                    .font(.system(size: 28))
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.white, .black.opacity(0.55))
                     .shadow(radius: 4)

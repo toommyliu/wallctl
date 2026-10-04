@@ -18,13 +18,4 @@ enum WallctlAppVariant {
             "Wallctl Live"
         }
     }
-
-    var windowAutosaveName: String {
-        switch self {
-        case .full:
-            "wallctl.main-window"
-        case .live:
-            "wallctl.live.main-window"
-        }
-    }
 }

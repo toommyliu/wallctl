@@ -19,19 +19,23 @@ final class MainWindowPresenter: NSObject, ObservableObject, NSWindowDelegate {
             return
         }
 
-        let rootView: AnyView
-        let defaultSize: NSSize
 #if WALLCTL_LIVE
-        rootView = AnyView(LiveWallpaperView().environmentObject(store))
-        defaultSize = NSSize(width: 620, height: 640)
+        let host = NSHostingController(rootView: AnyView(LiveWallpaperView().environmentObject(store)))
+        host.sizingOptions = .preferredContentSize
+        let defaultSize = host.view.fittingSize
+        let styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+        let autosaveName: String? = nil
 #else
-        rootView = AnyView(ContentView().environmentObject(store))
-        defaultSize = NSSize(width: 1_100, height: 720)
+        let host = NSHostingController(rootView: AnyView(ContentView().environmentObject(store)))
+        let defaultSize = NSSize(width: 1_100, height: 720)
+        let styleMask: NSWindow.StyleMask = [
+            .titled, .closable, .miniaturizable, .resizable, .fullSizeContentView,
+        ]
+        let autosaveName: String? = "wallctl.main-window"
 #endif
-        let host = NSHostingController(rootView: rootView)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: defaultSize),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
@@ -43,8 +47,10 @@ final class MainWindowPresenter: NSObject, ObservableObject, NSWindowDelegate {
         window.contentViewController = host
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.setFrameAutosaveName(variant.windowAutosaveName)
-        if !window.setFrameUsingName(variant.windowAutosaveName) {
+        if let autosaveName {
+            window.setFrameAutosaveName(autosaveName)
+        }
+        if !(autosaveName.map(window.setFrameUsingName) ?? false) {
             window.center()
         }
         self.window = window

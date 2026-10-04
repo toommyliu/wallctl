@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 enum LiveVideoSource {
@@ -68,8 +69,66 @@ struct PlaybackConstraints: Equatable {
         if !enabled { return "Live wallpaper is off" }
         if screenUnavailable { return "Display is asleep or locked" }
         if lowPowerMode { return "Low Power Mode is on" }
-        if pauseOnBattery && onBattery { return "Paused on battery" }
-        if desktopOccluded { return "Desktop is fully covered" }
+        if pauseOnBattery && onBattery { return "On battery power" }
+        if desktopOccluded { return "Desktop is covered by windows" }
         return nil
+    }
+}
+
+struct LivePlaybackState: Equatable {
+    enum Phase: Equatable {
+        case loading
+        case off
+        case noVideo
+        case playing
+        case paused
+    }
+
+    let phase: Phase
+    let isToggleEnabled: Bool
+    let status: String
+
+    var isLiveEnabled: Bool {
+        phase != .loading && phase != .off
+    }
+
+    static func updates(
+        _ config: Published<LiveConfig?>.Publisher,
+        _ isWorking: Published<Bool>.Publisher,
+        _ constraints: Published<PlaybackConstraints>.Publisher,
+        _ activeVideo: Published<URL?>.Publisher
+    ) -> AnyPublisher<Self, Never> {
+        Publishers.CombineLatest4(config, isWorking, constraints, activeVideo)
+            .map(Self.init)
+            .eraseToAnyPublisher()
+    }
+
+    init(
+        config: LiveConfig?,
+        isWorking: Bool,
+        constraints: PlaybackConstraints,
+        activeVideo: URL?
+    ) {
+        guard let config else {
+            phase = .loading
+            isToggleEnabled = false
+            status = "Loading…"
+            return
+        }
+
+        isToggleEnabled = !isWorking
+        if !config.enabled {
+            phase = .off
+            status = "Off"
+        } else if activeVideo == nil {
+            phase = .noVideo
+            status = "No video for the current wallpaper"
+        } else if constraints.shouldPlay {
+            phase = .playing
+            status = "Playing"
+        } else {
+            phase = .paused
+            status = constraints.pauseReason.map { "Paused · \($0)" } ?? "Paused"
+        }
     }
 }

@@ -34,6 +34,19 @@ final class WallctlStore: ObservableObject {
         catalog.collections.first { $0.name == selection }
     }
 
+    var liveProfile: WallpaperProfile? {
+        guard let liveConfig else { return nil }
+        let collectionName = liveConfig.followActiveCollection
+            ? status?.activeCollection
+            : liveConfig.pinnedCollection
+        guard let collection = catalog.collections.first(where: { $0.name == collectionName })
+        else { return nil }
+        let profileName = collectionName == status?.activeCollection
+            ? status?.expectedProfile
+            : pinnedProfileName(for: collection)
+        return collection.profiles.first { $0.name == profileName }
+    }
+
     func start() {
         guard pollTask == nil,
               ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
@@ -165,11 +178,6 @@ final class WallctlStore: ObservableObject {
         }
     }
 
-    func setFollowActive(_ enabled: Bool) {
-        perform("Live source preference updated") { client in
-            try await client.setLivePreferences(followActive: enabled)
-        }
-    }
 
     func setPauseOnBattery(_ enabled: Bool) {
         perform("Battery preference updated") { client in
@@ -177,9 +185,16 @@ final class WallctlStore: ObservableObject {
         }
     }
 
-    func setPinnedCollection(_ name: String?) {
-        perform("Pinned collection updated") { client in
-            try await client.setLivePreferences(pinnedCollection: .some(name))
+    func setLiveSource(pinnedCollection: String?) {
+        perform("Live source updated") { client in
+            if let pinnedCollection {
+                try await client.setLivePreferences(
+                    followActive: false,
+                    pinnedCollection: .some(pinnedCollection)
+                )
+            } else {
+                try await client.setLivePreferences(followActive: true)
+            }
         }
     }
 
@@ -225,15 +240,7 @@ final class WallctlStore: ObservableObject {
 
     private func reconcileLiveWallpaper(onlyIfSourceChanged: Bool = false) {
         guard let liveConfig else { return }
-        let collectionName = liveConfig.followActiveCollection
-            ? status?.activeCollection
-            : liveConfig.pinnedCollection
-        let collection = catalog.collections.first { $0.name == collectionName }
-        let profileName = collectionName == status?.activeCollection
-            ? status?.expectedProfile
-            : pinnedProfileName(for: collection)
-        let profile = collection?.profiles.first { $0.name == profileName }
-        let videoURL = resolvedLiveVideoPath(for: profile).map { URL(fileURLWithPath: $0) }
+        let videoURL = resolvedLiveVideoPath(for: liveProfile).map { URL(fileURLWithPath: $0) }
         if onlyIfSourceChanged,
            LiveVideoSource.equivalent(videoURL, liveWallpaper.activeVideo) {
             return
@@ -271,8 +278,7 @@ final class WallctlStore: ObservableObject {
         )
     }
 
-    private func pinnedProfileName(for collection: WallpaperCollection?) -> String? {
-        guard let collection else { return nil }
+    private func pinnedProfileName(for collection: WallpaperCollection) -> String? {
         guard collection.strategy == "schedule", !collection.slots.isEmpty else {
             return collection.profiles.first?.name
         }

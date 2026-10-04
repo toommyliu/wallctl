@@ -32,9 +32,9 @@ final class PlaybackPolicyTests: XCTestCase {
             pauseOnBattery: true
         )
 
-        let source = LiveWallpaperMenuStateSource(config: enabled)
-        var states = [LiveWallpaperMenuState]()
-        let subscription = LiveWallpaperMenuState.updates(
+        let source = LivePlaybackStateSource(config: enabled)
+        var states = [LivePlaybackState]()
+        let subscription = LivePlaybackState.updates(
             source.$config,
             source.$isWorking,
             source.$constraints,
@@ -228,7 +228,7 @@ final class PlaybackPolicyTests: XCTestCase {
     }
 }
 
-private final class LiveWallpaperMenuStateSource {
+private final class LivePlaybackStateSource {
     @Published var config: LiveConfig?
     @Published var isWorking = false
     @Published var constraints = PlaybackConstraints()

@@ -144,7 +144,7 @@ private final class LiveWallpaperStatusItem: NSObject {
         keyEquivalent: ""
     )
     private let playbackStatus = NSMenuItem(
-        title: "Status: Loading…",
+        title: "Loading…",
         action: nil,
         keyEquivalent: ""
     )
@@ -164,7 +164,7 @@ private final class LiveWallpaperStatusItem: NSObject {
         statusItem.menu = makeMenu(variant: variant)
         self.statusItem = statusItem
 
-        LiveWallpaperMenuState.updates(
+        LivePlaybackState.updates(
             store.$liveConfig,
             store.$isWorking,
             store.liveWallpaper.$constraints,
@@ -189,11 +189,9 @@ private final class LiveWallpaperStatusItem: NSObject {
 
         menu.addItem(.separator())
 
-        let openItem = NSMenuItem(
-            title: "Open \(variant.displayName)",
-            action: #selector(openApp),
-            keyEquivalent: ""
-        )
+        let openItem = variant == .live
+            ? NSMenuItem(title: "Settings…", action: #selector(openApp), keyEquivalent: ",")
+            : NSMenuItem(title: "Open \(variant.displayName)", action: #selector(openApp), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
 
@@ -207,17 +205,11 @@ private final class LiveWallpaperStatusItem: NSObject {
         return menu
     }
 
-    private func update(_ state: LiveWallpaperMenuState) {
+    private func update(_ state: LivePlaybackState) {
         liveToggle.isEnabled = state.isToggleEnabled
         liveToggle.state = state.isLiveEnabled ? .on : .off
         statusItem?.button?.image = statusImage(enabled: state.isLiveEnabled)
-        setStatus(state.status)
-    }
-
-    private func setStatus(_ status: String) {
-        liveToggle.title = "Live Wallpaper"
-        playbackStatus.title = "Status: \(status)"
-        playbackStatus.isEnabled = false
+        playbackStatus.title = state.status
     }
 
     private func statusImage(enabled: Bool) -> NSImage? {
@@ -261,48 +253,5 @@ enum LiveWallpaperMenuLayout {
         placeholder.isTemplate = true
         item.onStateImage = checkmark
         item.offStateImage = placeholder
-    }
-}
-
-struct LiveWallpaperMenuState: Equatable {
-    let isLiveEnabled: Bool
-    let isToggleEnabled: Bool
-    let status: String
-
-    static func updates(
-        _ config: Published<LiveConfig?>.Publisher,
-        _ isWorking: Published<Bool>.Publisher,
-        _ constraints: Published<PlaybackConstraints>.Publisher,
-        _ activeVideo: Published<URL?>.Publisher
-    ) -> AnyPublisher<Self, Never> {
-        Publishers.CombineLatest4(config, isWorking, constraints, activeVideo)
-            .map(Self.init)
-            .eraseToAnyPublisher()
-    }
-
-    init(
-        config: LiveConfig?,
-        isWorking: Bool,
-        constraints: PlaybackConstraints,
-        activeVideo: URL?
-    ) {
-        guard let config else {
-            isLiveEnabled = false
-            isToggleEnabled = false
-            status = "Loading…"
-            return
-        }
-
-        isLiveEnabled = config.enabled
-        isToggleEnabled = !isWorking
-        if !config.enabled {
-            status = "Off"
-        } else if activeVideo == nil {
-            status = "Waiting for a live-capable profile"
-        } else if constraints.shouldPlay {
-            status = "Playing"
-        } else {
-            status = constraints.pauseReason ?? "Paused"
-        }
     }
 }

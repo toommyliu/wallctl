@@ -32,6 +32,23 @@ Run `wallctl` with no command to use the interactive menu. Most commands also
 work well directly from the shell, which is useful for scheduled dispatch and
 repeatable setup.
 
+## Build app artifacts
+
+Requires macOS, Xcode, and Cargo:
+
+```bash
+./scripts/build-artifacts.sh
+```
+
+Creates `dist/Wallctl-<architecture>.zip` and
+`dist/Wallctl Live-<architecture>.zip`, each containing a Release app bundle
+with the CLI embedded. Build logs are also saved in `dist/`.
+The apps target the build Mac's architecture and are ad-hoc signed, not notarized.
+
+Use `./scripts/build-artifacts.sh live` or `full` to build one app. An optional
+second argument sets the output directory. Repeated builds replace the matching
+archives and logs.
+
 ## Basic Workflow
 
 The usual flow starts in System Settings. Pick the wallpaper you want, then ask

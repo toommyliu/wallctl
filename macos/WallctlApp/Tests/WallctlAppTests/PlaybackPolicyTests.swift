@@ -68,13 +68,25 @@ final class PlaybackPolicyTests: XCTestCase {
 
     func testDesktopOcclusionPausesWithoutHidingWallpaper() {
         var constraints = PlaybackConstraints()
-        constraints.desktopOccluded = true
+        constraints.displayOcclusion = [1: true, 2: true]
 
         XCTAssertFalse(constraints.shouldPlay)
+        XCTAssertFalse(constraints.shouldPlay(on: 1))
         XCTAssertTrue(constraints.shouldKeepWallpaperVisible)
+        XCTAssertEqual(constraints.pauseReason, "Desktop is covered by windows")
 
         constraints.lowPowerMode = true
         XCTAssertFalse(constraints.shouldKeepWallpaperVisible)
+    }
+
+    func testCoveredDisplayPausesWhileUncoveredDisplayKeepsPlaying() {
+        var constraints = PlaybackConstraints()
+        constraints.displayOcclusion = [1: true, 2: false]
+
+        XCTAssertFalse(constraints.shouldPlay(on: 1))
+        XCTAssertTrue(constraints.shouldPlay(on: 2))
+        XCTAssertTrue(constraints.shouldPlay)
+        XCTAssertNil(constraints.pauseReason)
     }
 
     func testBatteryConstraintIsOptional() {

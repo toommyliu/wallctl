@@ -1,4 +1,5 @@
 import Combine
+import CoreGraphics
 import Foundation
 
 enum LiveVideoSource {
@@ -52,10 +53,18 @@ struct PlaybackConstraints: Equatable {
     var lowPowerMode = false
     var onBattery = false
     var pauseOnBattery = true
-    var desktopOccluded = false
+    var displayOcclusion: [CGDirectDisplayID: Bool] = [:]
 
     var shouldPlay: Bool {
         shouldKeepWallpaperVisible && !desktopOccluded
+    }
+
+    func shouldPlay(on display: CGDirectDisplayID) -> Bool {
+        shouldKeepWallpaperVisible && displayOcclusion[display] != true
+    }
+
+    private var desktopOccluded: Bool {
+        !displayOcclusion.isEmpty && displayOcclusion.values.allSatisfy { $0 }
     }
 
     var shouldKeepWallpaperVisible: Bool {

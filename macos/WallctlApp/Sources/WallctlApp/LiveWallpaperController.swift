@@ -245,15 +245,15 @@ final class LiveWallpaperController: ObservableObject {
     }
 
     private func updateOcclusion() {
-        constraints.desktopOccluded = Self.isDesktopFullyCovered()
+        constraints.displayOcclusion = Self.displayOcclusion()
         updatePlayback()
     }
 
-    private static func isDesktopFullyCovered() -> Bool {
+    private static func displayOcclusion() -> [CGDirectDisplayID: Bool] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]],
               let primary = NSScreen.screens.first
-        else { return false }
+        else { return [:] }
 
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let primaryHeight = primary.frame.maxY
@@ -273,7 +273,8 @@ final class LiveWallpaperController: ObservableObject {
             return CGRect(x: x, y: y, width: width, height: height)
         }
 
-        return NSScreen.screens.allSatisfy { screen in
+        let coverage: [(CGDirectDisplayID, Bool)] = NSScreen.screens.compactMap { screen in
+            guard let display = screen.displayID else { return nil }
             let frame = CGRect(
                 x: screen.frame.minX,
                 y: primaryHeight - screen.frame.maxY,
@@ -294,8 +295,9 @@ final class LiveWallpaperController: ObservableObject {
                     }
                 }
             }
-            return Double(covered) / Double(columns * rows) >= 0.9
+            return (display, Double(covered) / Double(columns * rows) >= 0.9)
         }
+        return Dictionary(coverage, uniquingKeysWith: { first, _ in first })
     }
 
     private func tearDownSurfaces() {
@@ -307,18 +309,20 @@ final class LiveWallpaperController: ObservableObject {
 
     private func updatePlayback() {
         guard currentSource != nil else { return }
-        if constraints.shouldKeepWallpaperVisible { startOptimizationIfNeeded() }
-        if constraints.shouldPlay {
-            idleUnloadTask?.cancel()
-            idleUnloadTask = nil
-            surfaces.values.forEach { $0.play() }
-        } else if constraints.shouldKeepWallpaperVisible {
-            idleUnloadTask?.cancel()
-            idleUnloadTask = nil
-            surfaces.values.forEach { $0.pause(keepingWindowVisible: true) }
-        } else {
+        guard constraints.shouldKeepWallpaperVisible else {
             surfaces.values.forEach { $0.pause(keepingWindowVisible: false) }
             scheduleIdleUnload()
+            return
+        }
+        startOptimizationIfNeeded()
+        idleUnloadTask?.cancel()
+        idleUnloadTask = nil
+        for (display, surface) in surfaces {
+            if constraints.shouldPlay(on: display) {
+                surface.play()
+            } else {
+                surface.pause(keepingWindowVisible: true)
+            }
         }
     }
 

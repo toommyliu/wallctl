@@ -93,6 +93,11 @@ impl WallctlPaths {
         self.assets_dir(collection).join("aerials")
     }
 
+    pub fn aerial_system_manifest_entries(&self) -> PathBuf {
+        self.wallpaper_extensions
+            .join("WallpaperAerialsExtension.appex/Contents/Resources/entries.json")
+    }
+
     pub fn extension_assets_dir(&self, collection: &str, provider: &str) -> PathBuf {
         self.assets_dir(collection)
             .join("extensions")

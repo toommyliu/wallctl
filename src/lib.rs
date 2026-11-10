@@ -1,3 +1,4 @@
+pub mod aerials;
 pub mod api;
 pub mod app;
 pub mod assets;

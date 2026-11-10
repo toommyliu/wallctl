@@ -3,20 +3,20 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use plist::Value;
-use serde_json::Value as JsonValue;
 
+use crate::aerials::{AerialManifest, AerialVideo};
 use crate::paths::WallctlPaths;
 use crate::profile::{self, ProfileInfo, AERIAL_PROVIDER};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CaptureAssetReport {
     pub copied_files: Vec<(PathBuf, PathBuf)>,
-    pub backed_up_aerial_asset: Option<PathBuf>,
+    pub backed_up_aerial_assets: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AssetValidation {
-    pub restored_aerial_asset: Option<PathBuf>,
+    pub restored_aerial_assets: Vec<PathBuf>,
 }
 
 pub fn prepare_captured_profile(
@@ -35,19 +35,14 @@ pub fn prepare_captured_profile(
         copy_wallpaper_asset(paths, collection, source)
     })?;
 
-    let backed_up_aerial_asset = if info.provider == AERIAL_PROVIDER {
-        let asset_id = info
-            .aerial_asset_id
-            .as_deref()
-            .expect("validate_profile requires asset id for Aerial profiles");
-        Some(backup_aerial_asset(paths, collection, asset_id)?)
-    } else {
-        None
+    let backed_up_aerial_assets = match aerial_videos(paths, &info)? {
+        Some(videos) => backup_aerial_videos(paths, collection, &videos)?,
+        None => Vec::new(),
     };
 
     Ok(CaptureAssetReport {
         copied_files,
-        backed_up_aerial_asset,
+        backed_up_aerial_assets,
     })
 }
 
@@ -62,19 +57,19 @@ pub fn validate_required_assets(
         }
     }
 
-    if info.provider == AERIAL_PROVIDER {
-        let asset_id = info
-            .aerial_asset_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Aerial profile is missing assetID"))?;
-        let cache = paths.aerial_cache.join(format!("{asset_id}.mov"));
-        let backup = paths
-            .aerial_assets_dir(collection)
-            .join(format!("{asset_id}.mov"));
-        if !cache.is_file() && !backup.is_file() {
+    if let Some(videos) = aerial_videos(paths, info)? {
+        let missing: Vec<String> = videos
+            .iter()
+            .filter(|video| {
+                !video.cache_path(paths).is_file()
+                    && !video.backup_path(paths, collection).is_file()
+            })
+            .map(|video| video.backup_path(paths, collection).display().to_string())
+            .collect();
+        if !missing.is_empty() {
             bail!(
-                "Aerial asset '{asset_id}' is missing from Apple cache and wallctl backup: {}",
-                backup.display()
+                "Aerial video(s) missing from Apple cache and wallctl backup: {}",
+                missing.join(", ")
             );
         }
     }
@@ -89,38 +84,44 @@ pub fn restore_required_assets(
 ) -> Result<AssetValidation> {
     validate_required_assets(paths, collection, info)?;
 
-    if info.provider != AERIAL_PROVIDER {
+    let Some(videos) = aerial_videos(paths, info)? else {
         return Ok(AssetValidation::default());
+    };
+
+    let mut restored_aerial_assets = Vec::new();
+    for video in videos {
+        let cache = video.cache_path(paths);
+        if cache.is_file() {
+            continue;
+        }
+        let backup = video.backup_path(paths, collection);
+        fs::create_dir_all(&paths.aerial_cache)
+            .with_context(|| format!("failed to create {}", paths.aerial_cache.display()))?;
+        fs::copy(&backup, &cache).with_context(|| {
+            format!(
+                "failed to restore Aerial video {} from {} to {}",
+                video.id,
+                backup.display(),
+                cache.display()
+            )
+        })?;
+        restored_aerial_assets.push(cache);
     }
 
+    Ok(AssetValidation {
+        restored_aerial_assets,
+    })
+}
+
+fn aerial_videos(paths: &WallctlPaths, info: &ProfileInfo) -> Result<Option<Vec<AerialVideo>>> {
+    if info.provider != AERIAL_PROVIDER {
+        return Ok(None);
+    }
     let asset_id = info
         .aerial_asset_id
         .as_deref()
-        .expect("validate_required_assets requires asset id");
-    let cache = paths.aerial_cache.join(format!("{asset_id}.mov"));
-    if cache.is_file() {
-        return Ok(AssetValidation::default());
-    }
-
-    let backup = paths
-        .aerial_assets_dir(collection)
-        .join(format!("{asset_id}.mov"));
-    if let Some(parent) = cache.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::copy(&backup, &cache).with_context(|| {
-        format!(
-            "failed to restore Aerial asset {} from {} to {}",
-            asset_id,
-            backup.display(),
-            cache.display()
-        )
-    })?;
-
-    Ok(AssetValidation {
-        restored_aerial_asset: Some(cache),
-    })
+        .ok_or_else(|| anyhow::anyhow!("Aerial profile is missing assetID"))?;
+    Ok(Some(AerialManifest::load(paths)?.videos(asset_id)))
 }
 
 fn copy_wallpaper_asset(paths: &WallctlPaths, collection: &str, source: &Path) -> Result<PathBuf> {
@@ -152,129 +153,50 @@ fn copy_wallpaper_asset(paths: &WallctlPaths, collection: &str, source: &Path) -
     Ok(destination)
 }
 
-fn backup_aerial_asset(paths: &WallctlPaths, collection: &str, asset_id: &str) -> Result<PathBuf> {
-    let source = paths.aerial_cache.join(format!("{asset_id}.mov"));
-    if !source.is_file() {
+fn backup_aerial_videos(
+    paths: &WallctlPaths,
+    collection: &str,
+    videos: &[AerialVideo],
+) -> Result<Vec<PathBuf>> {
+    let missing: Vec<String> = videos
+        .iter()
+        .map(|video| video.cache_path(paths))
+        .filter(|cache| !cache.is_file())
+        .map(|cache| cache.display().to_string())
+        .collect();
+    if !missing.is_empty() {
         bail!(
-            "Aerial asset '{asset_id}' is missing from Apple's cache: {}",
-            source.display()
+            "Aerial video(s) missing from Apple's cache: {}",
+            missing.join(", ")
         );
     }
 
-    let destination = paths
-        .aerial_assets_dir(collection)
-        .join(format!("{asset_id}.mov"));
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+    let backup_dir = paths.aerial_assets_dir(collection);
+    fs::create_dir_all(&backup_dir)
+        .with_context(|| format!("failed to create {}", backup_dir.display()))?;
+    let mut backed_up = Vec::with_capacity(videos.len());
+    for video in videos {
+        let source = video.cache_path(paths);
+        let destination = video.backup_path(paths, collection);
+        fs::copy(&source, &destination).with_context(|| {
+            format!(
+                "failed to back up Aerial video from {} to {}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+        backed_up.push(destination);
     }
-    fs::copy(&source, &destination).with_context(|| {
-        format!(
-            "failed to back up Aerial asset from {} to {}",
-            source.display(),
-            destination.display()
-        )
-    })?;
-    Ok(destination)
+    Ok(backed_up)
 }
 
 fn default_aerial_asset_id(paths: &WallctlPaths) -> Result<Option<String>> {
-    if !paths.aerial_manifest_entries.is_file() {
-        return Ok(None);
-    }
-
-    let manifest = fs::read_to_string(&paths.aerial_manifest_entries).with_context(|| {
-        format!(
-            "failed to read Aerial manifest {}",
-            paths.aerial_manifest_entries.display()
-        )
-    })?;
-    let manifest: JsonValue = serde_json::from_str(&manifest).with_context(|| {
-        format!(
-            "failed to parse Aerial manifest {}",
-            paths.aerial_manifest_entries.display()
-        )
-    })?;
-
-    for asset_id in representative_aerial_asset_ids(&manifest)
+    let manifest = AerialManifest::read(&paths.aerial_manifest_entries)?;
+    Ok(manifest
+        .default_candidate_ids()
         .into_iter()
-        .chain(aerial_asset_ids(&manifest))
-    {
-        if paths.aerial_cache.join(format!("{asset_id}.mov")).is_file() {
-            return Ok(Some(asset_id));
-        }
-    }
-
-    Ok(None)
-}
-
-fn representative_aerial_asset_ids(manifest: &JsonValue) -> Vec<String> {
-    let mut candidates: Vec<OrderedAssetId> = Vec::new();
-    let Some(categories) = manifest.get("categories").and_then(JsonValue::as_array) else {
-        return Vec::new();
-    };
-
-    for category in categories {
-        if let Some(asset_id) = category
-            .get("representativeAssetID")
-            .and_then(JsonValue::as_str)
-        {
-            candidates.push(ordered_asset_id(category, asset_id));
-        }
-
-        if let Some(subcategories) = category.get("subcategories").and_then(JsonValue::as_array) {
-            for subcategory in subcategories {
-                if let Some(asset_id) = subcategory
-                    .get("representativeAssetID")
-                    .and_then(JsonValue::as_str)
-                {
-                    candidates.push(ordered_asset_id(subcategory, asset_id));
-                }
-            }
-        }
-    }
-
-    candidates.sort_by_key(|candidate| candidate.preferred_order);
-    candidates
-        .into_iter()
-        .map(|candidate| candidate.asset_id)
-        .collect()
-}
-
-fn aerial_asset_ids(manifest: &JsonValue) -> Vec<String> {
-    let mut candidates: Vec<OrderedAssetId> = Vec::new();
-    let Some(assets) = manifest.get("assets").and_then(JsonValue::as_array) else {
-        return Vec::new();
-    };
-
-    for asset in assets {
-        let Some(asset_id) = asset.get("id").and_then(JsonValue::as_str) else {
-            continue;
-        };
-        candidates.push(ordered_asset_id(asset, asset_id));
-    }
-
-    candidates.sort_by_key(|candidate| candidate.preferred_order);
-    candidates
-        .into_iter()
-        .map(|candidate| candidate.asset_id)
-        .collect()
-}
-
-fn ordered_asset_id(value: &JsonValue, asset_id: &str) -> OrderedAssetId {
-    OrderedAssetId {
-        preferred_order: value
-            .get("preferredOrder")
-            .and_then(JsonValue::as_i64)
-            .unwrap_or(i64::MAX),
-        asset_id: asset_id.to_string(),
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct OrderedAssetId {
-    preferred_order: i64,
-    asset_id: String,
+        .find(|id| paths.aerial_cache.join(format!("{id}.mov")).is_file())
+        .map(str::to_string))
 }
 
 fn unique_destination(dir: &Path, filename: &std::ffi::OsStr) -> PathBuf {
@@ -311,10 +233,138 @@ mod tests {
     use plist::{Dictionary, Value};
     use tempfile::TempDir;
 
+    use crate::aerials::tests::dynamic_manifest_json;
     use crate::paths::WallctlPaths;
-    use crate::profile::{analyze_profile, AERIAL_PROVIDER};
+    use crate::profile::{self, analyze_profile, AERIAL_PROVIDER};
 
-    use super::{prepare_captured_profile, restore_required_assets};
+    use super::{prepare_captured_profile, restore_required_assets, validate_required_assets};
+
+    const GOLDEN_GATE: &str = "17647EAB-8357-48B0-BCD6-B892194267C5";
+    const GOLDEN_GATE_VIDEOS: [&str; 3] = ["light-landscape", "light-portrait", "dark-landscape"];
+
+    fn isolated_paths(tmp: &TempDir) -> WallctlPaths {
+        let mut paths = WallctlPaths::from_home(tmp.path());
+        paths.wallpaper_extensions = tmp.path().join("Extensions");
+        paths
+    }
+
+    fn install_dynamic_system_manifest(paths: &WallctlPaths) {
+        let manifest = paths.aerial_system_manifest_entries();
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        fs::write(manifest, dynamic_manifest_json()).unwrap();
+    }
+
+    fn aerial_profile(asset_id: &str) -> Value {
+        let mut choice = Dictionary::new();
+        choice.insert(
+            "Provider".to_string(),
+            Value::String(AERIAL_PROVIDER.to_string()),
+        );
+        choice.insert(
+            "Configuration".to_string(),
+            Value::Data(profile::aerial_configuration_data(asset_id).unwrap()),
+        );
+        let mut content = Dictionary::new();
+        content.insert(
+            "Choices".to_string(),
+            Value::Array(vec![Value::Dictionary(choice)]),
+        );
+        let mut linked = Dictionary::new();
+        linked.insert("Content".to_string(), Value::Dictionary(content));
+        let mut all = Dictionary::new();
+        all.insert("Linked".to_string(), Value::Dictionary(linked));
+        let mut root = Dictionary::new();
+        root.insert("AllSpacesAndDisplays".to_string(), Value::Dictionary(all));
+        Value::Dictionary(root)
+    }
+
+    #[test]
+    fn captures_every_variant_of_a_combined_dynamic_aerial() {
+        let tmp = TempDir::new().unwrap();
+        let paths = isolated_paths(&tmp);
+        install_dynamic_system_manifest(&paths);
+        fs::create_dir_all(&paths.aerial_cache).unwrap();
+        for id in GOLDEN_GATE_VIDEOS {
+            fs::write(paths.aerial_cache.join(format!("{id}.mov")), id).unwrap();
+        }
+        let mut profile = aerial_profile(GOLDEN_GATE);
+
+        let report = prepare_captured_profile(&paths, "dynamic", &mut profile).unwrap();
+
+        let expected: Vec<_> = GOLDEN_GATE_VIDEOS
+            .iter()
+            .map(|id| paths.aerial_assets_dir("dynamic").join(format!("{id}.mov")))
+            .collect();
+        assert_eq!(report.backed_up_aerial_assets, expected);
+        assert!(expected.iter().all(|path| path.is_file()));
+    }
+
+    #[test]
+    fn capture_of_combined_dynamic_aerial_names_missing_variants() {
+        let tmp = TempDir::new().unwrap();
+        let paths = isolated_paths(&tmp);
+        install_dynamic_system_manifest(&paths);
+        fs::create_dir_all(&paths.aerial_cache).unwrap();
+        fs::write(paths.aerial_cache.join("light-landscape.mov"), b"light").unwrap();
+        let mut profile = aerial_profile(GOLDEN_GATE);
+
+        let error = prepare_captured_profile(&paths, "dynamic", &mut profile)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("light-portrait.mov"), "{error}");
+        assert!(error.contains("dark-landscape.mov"), "{error}");
+        assert!(!error.contains(GOLDEN_GATE), "{error}");
+    }
+
+    #[test]
+    fn restores_every_missing_variant_of_a_combined_dynamic_aerial() {
+        let tmp = TempDir::new().unwrap();
+        let paths = isolated_paths(&tmp);
+        install_dynamic_system_manifest(&paths);
+        let backup_dir = paths.aerial_assets_dir("dynamic");
+        fs::create_dir_all(&backup_dir).unwrap();
+        for id in GOLDEN_GATE_VIDEOS {
+            fs::write(backup_dir.join(format!("{id}.mov")), id).unwrap();
+        }
+        fs::create_dir_all(&paths.aerial_cache).unwrap();
+        fs::write(paths.aerial_cache.join("light-landscape.mov"), b"cached").unwrap();
+        let info = analyze_profile(&aerial_profile(GOLDEN_GATE)).unwrap();
+
+        let restored = restore_required_assets(&paths, "dynamic", &info)
+            .unwrap()
+            .restored_aerial_assets;
+
+        assert_eq!(
+            restored,
+            [
+                paths.aerial_cache.join("light-portrait.mov"),
+                paths.aerial_cache.join("dark-landscape.mov"),
+            ]
+        );
+        assert_eq!(
+            fs::read(paths.aerial_cache.join("light-landscape.mov")).unwrap(),
+            b"cached"
+        );
+    }
+
+    #[test]
+    fn combined_dynamic_aerial_is_invalid_when_a_variant_has_no_copy() {
+        let tmp = TempDir::new().unwrap();
+        let paths = isolated_paths(&tmp);
+        install_dynamic_system_manifest(&paths);
+        fs::create_dir_all(&paths.aerial_cache).unwrap();
+        for id in ["light-landscape", "light-portrait"] {
+            fs::write(paths.aerial_cache.join(format!("{id}.mov")), id).unwrap();
+        }
+        let info = analyze_profile(&aerial_profile(GOLDEN_GATE)).unwrap();
+
+        let error = validate_required_assets(&paths, "dynamic", &info)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("dark-landscape.mov"), "{error}");
+    }
 
     #[test]
     fn copies_and_rewrites_file_asset_references() {
@@ -357,7 +407,7 @@ mod tests {
     #[test]
     fn restores_missing_aerial_cache_from_backup() {
         let tmp = TempDir::new().unwrap();
-        let paths = WallctlPaths::from_home(tmp.path());
+        let paths = isolated_paths(&tmp);
         let backup = paths.aerial_assets_dir("aerial").join("asset-1.mov");
         fs::create_dir_all(backup.parent().unwrap()).unwrap();
         fs::write(&backup, b"movie").unwrap();
@@ -370,15 +420,15 @@ mod tests {
 
         let restored = restore_required_assets(&paths, "aerial", &info)
             .unwrap()
-            .restored_aerial_asset
-            .unwrap();
-        assert!(restored.is_file());
+            .restored_aerial_assets;
+        assert_eq!(restored, [paths.aerial_cache.join("asset-1.mov")]);
+        assert!(restored[0].is_file());
     }
 
     #[test]
     fn promotes_default_wallpaper_to_manifest_aerial_asset_on_capture() {
         let tmp = TempDir::new().unwrap();
-        let paths = WallctlPaths::from_home(tmp.path());
+        let paths = isolated_paths(&tmp);
         let asset_id = "4C108785-A7BA-422E-9C79-B0129F1D5550";
         let cache_asset = paths.aerial_cache.join(format!("{asset_id}.mov"));
         fs::create_dir_all(cache_asset.parent().unwrap()).unwrap();
@@ -431,12 +481,10 @@ mod tests {
         assert_eq!(info.provider, AERIAL_PROVIDER);
         assert_eq!(info.aerial_asset_id.as_deref(), Some(asset_id));
         assert_eq!(
-            report.backed_up_aerial_asset,
-            Some(
-                paths
-                    .aerial_assets_dir("aerial")
-                    .join(format!("{asset_id}.mov"))
-            )
+            report.backed_up_aerial_assets,
+            [paths
+                .aerial_assets_dir("aerial")
+                .join(format!("{asset_id}.mov"))]
         );
     }
 }

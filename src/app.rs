@@ -302,7 +302,7 @@ where
             "profile": profile_name,
             "profile_path": target,
             "copied_files": report.copied_files,
-            "backed_up_aerial_asset": report.backed_up_aerial_asset,
+            "backed_up_aerial_assets": report.backed_up_aerial_assets,
         }))
     }
 
@@ -488,8 +488,8 @@ where
         if !report.copied_files.is_empty() {
             println!("Copied {} referenced asset(s)", report.copied_files.len());
         }
-        if let Some(path) = report.backed_up_aerial_asset {
-            println!("Backed up Aerial asset: {}", self.paths.path_in_home(&path));
+        for path in &report.backed_up_aerial_assets {
+            println!("Backed up Aerial video: {}", self.paths.path_in_home(path));
         }
         Ok(())
     }
@@ -895,7 +895,7 @@ where
 
         Ok(wallpaper::ApplyOutcome::Applied {
             fingerprint: selected_fingerprint,
-            restored_asset: restore.restored_aerial_asset.is_some(),
+            restored_asset: !restore.restored_aerial_assets.is_empty(),
         })
     }
 

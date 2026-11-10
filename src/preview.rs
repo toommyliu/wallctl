@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -6,6 +5,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
+use crate::aerials::{AerialManifest, Appearance, Orientation};
 use crate::assets;
 use crate::config::{ApplyMode, Strategy};
 use crate::live;
@@ -61,7 +61,7 @@ pub struct ProfilePreview {
 }
 
 pub fn load_catalog(paths: &WallctlPaths) -> Result<Catalog> {
-    let manifest = read_aerial_manifest(paths)?;
+    let manifest = AerialManifest::load(paths)?;
     let live_config = live::read_live_config(paths)?;
     let mut collections = Vec::new();
 
@@ -100,7 +100,7 @@ fn load_profile_preview(
     collection: &str,
     name: &str,
     assigned_video: Option<PathBuf>,
-    manifest: &BTreeMap<String, AerialManifestAsset>,
+    manifest: &AerialManifest,
 ) -> ProfilePreview {
     let path = paths.profile_path(collection, name);
     if !path.is_file() {
@@ -177,26 +177,48 @@ fn load_profile_preview(
     let manifest_asset = info
         .aerial_asset_id
         .as_deref()
-        .and_then(|asset_id| manifest.get(asset_id));
+        .and_then(|asset_id| manifest.display_asset(asset_id));
     let extension_asset = if manifest_asset.is_none() {
         extension_wallpaper_asset(paths, collection, &info.provider)
     } else {
         None
     };
-    let aerial_video = info.aerial_asset_id.as_deref().and_then(|asset_id| {
-        first_existing_path(&[
-            paths.aerial_cache.join(format!("{asset_id}.mov")),
-            paths
-                .aerial_assets_dir(collection)
-                .join(format!("{asset_id}.mov")),
-        ])
+    let aerial_videos: Vec<_> = info
+        .aerial_asset_id
+        .as_deref()
+        .map(|asset_id| manifest.videos(asset_id))
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|video| {
+            first_existing_path(&[
+                video.cache_path(paths),
+                video.backup_path(paths, collection),
+            ])
+            .map(|path| (video.variant, path))
+        })
+        .collect();
+    let aerial_landscape_video = |appearance: Appearance| {
+        aerial_videos
+            .iter()
+            .find(|(variant, _)| {
+                variant.is_some_and(|variant| {
+                    variant.appearance == appearance
+                        && variant.orientation == Orientation::Landscape
+                })
+            })
+            .map(|(_, path)| path.clone())
+    };
+    let light_video_path = aerial_landscape_video(Appearance::Light).or_else(|| {
+        extension_asset
+            .as_ref()
+            .and_then(|asset| asset.light_video_path.clone())
     });
-    let light_video_path = extension_asset
-        .as_ref()
-        .and_then(|asset| asset.light_video_path.clone());
-    let dark_video_path = extension_asset
-        .as_ref()
-        .and_then(|asset| asset.dark_video_path.clone());
+    let dark_video_path = aerial_landscape_video(Appearance::Dark).or_else(|| {
+        extension_asset
+            .as_ref()
+            .and_then(|asset| asset.dark_video_path.clone())
+    });
+    let aerial_video = aerial_videos.first().map(|(_, path)| path.clone());
     let automatic_video =
         aerial_video.or_else(|| light_video_path.clone().or_else(|| dark_video_path.clone()));
     let automatic_live_asset = assigned_video.is_none() && automatic_video.is_some();
@@ -237,7 +259,12 @@ fn load_profile_preview(
         provider: Some(info.provider),
         aerial_asset_id: info.aerial_asset_id,
         display_name: manifest_asset
-            .map(|asset| asset.accessibility_label.clone())
+            .map(|asset| {
+                asset
+                    .accessibility_label
+                    .clone()
+                    .unwrap_or_else(|| asset.id.clone())
+            })
             .or_else(|| extension_asset.map(|asset| asset.display_name)),
         preview_image_url: manifest_asset.and_then(|asset| asset.preview_image.clone()),
         still_image_path,
@@ -537,58 +564,6 @@ fn first_existing_path(paths: &[PathBuf]) -> Option<PathBuf> {
     paths.iter().find(|path| path.is_file()).cloned()
 }
 
-#[derive(Clone, Debug)]
-struct AerialManifestAsset {
-    accessibility_label: String,
-    preview_image: Option<String>,
-}
-
-fn read_aerial_manifest(paths: &WallctlPaths) -> Result<BTreeMap<String, AerialManifestAsset>> {
-    if !paths.aerial_manifest_entries.is_file() {
-        return Ok(BTreeMap::new());
-    }
-    let source = fs::read_to_string(&paths.aerial_manifest_entries).with_context(|| {
-        format!(
-            "failed to read Aerial manifest {}",
-            paths.aerial_manifest_entries.display()
-        )
-    })?;
-    let value: JsonValue = serde_json::from_str(&source).with_context(|| {
-        format!(
-            "failed to parse Aerial manifest {}",
-            paths.aerial_manifest_entries.display()
-        )
-    })?;
-    let mut assets = BTreeMap::new();
-    for asset in value
-        .get("assets")
-        .and_then(JsonValue::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let Some(id) = asset.get("id").and_then(JsonValue::as_str) else {
-            continue;
-        };
-        let label = asset
-            .get("accessibilityLabel")
-            .and_then(JsonValue::as_str)
-            .unwrap_or(id)
-            .to_string();
-        let preview_image = asset
-            .get("previewImage")
-            .and_then(JsonValue::as_str)
-            .map(str::to_string);
-        assets.insert(
-            id.to_string(),
-            AerialManifestAsset {
-                accessibility_label: label,
-                preview_image,
-            },
-        );
-    }
-    Ok(assets)
-}
-
 #[allow(dead_code)]
 fn _is_video(path: &Path) -> bool {
     matches!(
@@ -652,6 +627,64 @@ mod tests {
         assert!(preview.live_capable);
         assert!(preview.automatic_live_asset);
         assert_eq!(preview.aerial_asset_id.as_deref(), Some(asset_id));
+    }
+
+    #[test]
+    fn catalog_exposes_light_and_dark_clips_of_a_combined_dynamic_aerial() {
+        let tmp = TempDir::new().unwrap();
+        let mut paths = WallctlPaths::from_home(tmp.path());
+        paths.wallpaper_extensions = tmp.path().join("Extensions");
+        let manifest = paths.aerial_system_manifest_entries();
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        fs::write(manifest, crate::aerials::tests::dynamic_manifest_json()).unwrap();
+        let config = CollectionConfig::new_static("gate".to_string(), "Gate".to_string());
+        storage::write_collection(&paths, &config).unwrap();
+
+        let mut choice = Dictionary::new();
+        choice.insert(
+            "Provider".to_string(),
+            Value::String(AERIAL_PROVIDER.to_string()),
+        );
+        choice.insert(
+            "Configuration".to_string(),
+            Value::Data(
+                profile::aerial_configuration_data("17647EAB-8357-48B0-BCD6-B892194267C5").unwrap(),
+            ),
+        );
+        let mut content = Dictionary::new();
+        content.insert(
+            "Choices".to_string(),
+            Value::Array(vec![Value::Dictionary(choice)]),
+        );
+        let mut linked = Dictionary::new();
+        linked.insert("Content".to_string(), Value::Dictionary(content));
+        let mut all = Dictionary::new();
+        all.insert("Linked".to_string(), Value::Dictionary(linked));
+        let mut root = Dictionary::new();
+        root.insert("AllSpacesAndDisplays".to_string(), Value::Dictionary(all));
+        profile::write_profile(
+            &paths.profile_path("gate", "default"),
+            &Value::Dictionary(root),
+        )
+        .unwrap();
+        fs::create_dir_all(&paths.aerial_cache).unwrap();
+        for id in ["light-landscape", "light-portrait", "dark-landscape"] {
+            fs::write(paths.aerial_cache.join(format!("{id}.mov")), id).unwrap();
+        }
+
+        let catalog = load_catalog(&paths).unwrap();
+        let preview = &catalog.collections[0].profiles[0];
+
+        assert!(preview.valid, "{:?}", preview.issues);
+        assert_eq!(preview.display_name.as_deref(), Some("macOS"));
+        assert_eq!(
+            preview.light_video_path,
+            Some(paths.aerial_cache.join("light-landscape.mov"))
+        );
+        assert_eq!(
+            preview.dark_video_path,
+            Some(paths.aerial_cache.join("dark-landscape.mov"))
+        );
     }
 
     #[test]

@@ -13,8 +13,12 @@ final class LiveWallpaperController: ObservableObject {
     nonisolated(unsafe) private var occlusionTimer: Timer?
     private var currentSource: URL?
     private var idleUnloadTask: Task<Void, Never>?
+    private let optimizer: LiveVideoOptimizer
+    private var optimizationTask: Task<Void, Never>?
+    private var settledOptimization: URL?
 
-    init() {
+    init(optimizer: LiveVideoOptimizer = .standard) {
+        self.optimizer = optimizer
         installObservers()
         updatePowerState()
     }
@@ -25,6 +29,7 @@ final class LiveWallpaperController: ObservableObject {
         }
         occlusionTimer?.invalidate()
         idleUnloadTask?.cancel()
+        optimizationTask?.cancel()
     }
 
     func reconcile(videoURL: URL?, enabled: Bool, pauseOnBattery: Bool) {
@@ -36,6 +41,7 @@ final class LiveWallpaperController: ObservableObject {
         guard enabled, let videoURL else {
             currentSource = videoURL
             activeVideo = videoURL
+            cancelOptimization()
             tearDownSurfaces()
             return
         }
@@ -43,6 +49,7 @@ final class LiveWallpaperController: ObservableObject {
         let sourceChanged = !LiveVideoSource.equivalent(videoURL, currentSource)
         currentSource = videoURL
         activeVideo = videoURL
+        if sourceChanged { cancelOptimization() }
         let hadSurfaces = !surfaces.isEmpty
         if !hadSurfaces { rebuildSurfaces() }
         guard sourceChanged else {
@@ -51,10 +58,48 @@ final class LiveWallpaperController: ObservableObject {
             return
         }
         if hadSurfaces {
+            let playbackURL = playbackURL(for: videoURL)
             for surface in surfaces.values {
-                surface.setVideo(videoURL)
+                surface.setVideo(playbackURL)
             }
         }
+        updatePlayback()
+    }
+
+    private func playbackURL(for source: URL) -> URL {
+        optimizer.cachedURL(for: source) ?? source
+    }
+
+    private func cancelOptimization() {
+        optimizationTask?.cancel()
+        optimizationTask = nil
+        settledOptimization = nil
+    }
+
+    private func startOptimizationIfNeeded() {
+        guard optimizationTask == nil,
+              let source = currentSource,
+              !LiveVideoSource.equivalent(source, settledOptimization)
+        else { return }
+        guard optimizer.cachedURL(for: source) == nil else {
+            settledOptimization = source
+            return
+        }
+        let optimizer = optimizer
+        optimizationTask = Task(priority: .utility) { [weak self] in
+            let outcome = await optimizer.optimize(source)
+            guard !Task.isCancelled else { return }
+            self?.optimizationFinished(source, outcome)
+        }
+    }
+
+    private func optimizationFinished(_ source: URL, _ outcome: LiveVideoOptimizer.Outcome) {
+        optimizationTask = nil
+        settledOptimization = source
+        guard case .optimized(let url) = outcome,
+              LiveVideoSource.equivalent(source, currentSource)
+        else { return }
+        surfaces.values.forEach { $0.setVideo(url) }
         updatePlayback()
     }
 
@@ -193,7 +238,7 @@ final class LiveWallpaperController: ObservableObject {
             }
             let surface = DesktopVideoSurface(screen: screen)
             surfaces[id] = surface
-            if let currentSource { surface.setVideo(currentSource) }
+            if let currentSource { surface.setVideo(playbackURL(for: currentSource)) }
         }
         updateOcclusion()
         updatePlayback()
@@ -262,6 +307,7 @@ final class LiveWallpaperController: ObservableObject {
 
     private func updatePlayback() {
         guard currentSource != nil else { return }
+        if constraints.shouldKeepWallpaperVisible { startOptimizationIfNeeded() }
         if constraints.shouldPlay {
             idleUnloadTask?.cancel()
             idleUnloadTask = nil
